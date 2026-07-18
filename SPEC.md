@@ -28,6 +28,9 @@ A static, offline-capable archive and modern browser tracker for the music uploa
 - R7: Never represent audio-derived or empty recovery drafts as recovered original modules.
 - R8: Build and deploy as a static GitHub Pages site with no backend, account, analytics, or tracking.
 - R9: Work well with keyboard, mouse, touch, reduced motion, and narrow screens.
+- R10: During recovered source playback, keep a fixed centre playhead while pattern rows move continuously past it at the source recording's row rate.
+- R11: Present View, Edit, and Export as the three obvious workspace actions; entering View or Edit must never trigger a download.
+- R12: Use a restrained animated neon-sunset background and compact layout without reducing tracker contrast, legibility, or interaction speed.
 
 ## Acceptance checks
 
@@ -38,6 +41,10 @@ A static, offline-capable archive and modern browser tracker for the music uploa
 - C5: Browser smoke test proves library selection, reference playback element, note editing, transport, export controls, and responsive layout.
 - C6: The deployed Pages URL returns HTTP 200 and its asset URLs resolve.
 - C7: A scrub finds no secrets, credentials, cookies, or private personal data in tracked files.
+- C8: A browser playback check samples the tracker scroll position multiple times and proves continuous movement while the page scroll position stays fixed.
+- C9: The centre playhead remains at a stable viewport coordinate while its order/row label advances with the recording.
+- C10: Desktop and narrow-screen browser checks expose unique View, Edit, and Export controls without page-level horizontal overflow.
+- C11: `prefers-reduced-motion` disables decorative sunset/grid motion and smooth tracker scrolling.
 
 ## Out of scope for this recovery pass
 

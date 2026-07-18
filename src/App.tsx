@@ -299,10 +299,13 @@ function App() {
             <h2>{selectedTrack.shortTitle}</h2>
             <p>{selectedTrack.description}</p>
             {selectedTrack.credit && <p className="credit">{selectedTrack.credit}</p>}
+            <div className="workspace-mode" aria-label="Workspace mode">
+              <button className={!editing ? 'active' : ''} onClick={() => setEditMode(false)}><span>View</span><small>source animation</small></button>
+              <button className={editing ? 'active' : ''} onClick={() => setEditMode(true)}><span>Edit</span><small>browser workspace</small></button>
+              <details className="export-menu mode-export"><summary>Export</summary><div><button onClick={exportNative}>Chipvault JSON</button><button onClick={exportFami}>FamiTracker TXT</button><a href={asset(selectedTrack.audio)} download={`${selectedTrack.slug}.m4a`}>Source audio M4A</a><button onClick={() => importRef.current?.click()}>Import project</button>{editing && <button className="danger-action" onClick={reset}>Fresh draft</button>}</div></details>
+            </div>
             <div className="source-player">
               <audio ref={audioRef} key={selectedTrack.id} src={asset(selectedTrack.audio)} controls preload="metadata" onPlay={() => { stop(); setReferencePlaying(true); setMessage('Playing original recording') }} onPause={() => setReferencePlaying(false)} onTimeUpdate={syncReference} />
-              <button className={`edit-online-button ${editing ? 'active' : ''}`} onClick={() => setEditMode(!editing)}>{editing ? 'Finish editing' : 'Edit in browser'}</button>
-              <a className="download-link" href={asset(selectedTrack.audio)} download={`${selectedTrack.slug}.m4a`}>Download source audio ↓</a>
               <a className="youtube-link" href={selectedTrack.sourceUrl} target="_blank" rel="noreferrer">Original upload ↗</a>
             </div>
           </div>
@@ -331,7 +334,6 @@ function App() {
             <button onClick={undo} disabled={!undoStack.length} title="Undo">↶</button>
             <button onClick={redo} disabled={!redoStack.length} title="Redo">↷</button>
             {editing && <button className="save-button" onClick={saveWorkspace}>Save</button>}
-            <details className="export-menu"><summary>Export</summary><div><button onClick={exportNative}>Chipvault JSON</button><button onClick={exportFami}>FamiTracker TXT</button><button onClick={() => importRef.current?.click()}>Import project</button></div></details>
             <span className="save-state"><i /> {editing ? 'browser autosave' : 'source view'}</span>
           </div>
 
@@ -344,7 +346,7 @@ function App() {
           </div>
 
           {view === 'tracker' ? (
-            <TrackerGrid project={project} playhead={playhead} selectedChannel={selectedChannel} selectedRow={selectedRow} muted={muted} editing={editing} onMute={(id) => setMuted((current) => { const next = new Set(current); next.has(id) ? next.delete(id) : next.add(id); return next })} onSelect={(id, row) => { setSelectedChannel(id); setSelectedRow(row) }} onClear={(id, row) => setNote(id, row, null)} />
+            <TrackerGrid project={project} playhead={playhead} referenceAudioRef={audioRef} referencePlaying={referencePlaying} chipPlaying={playing} selectedChannel={selectedChannel} selectedRow={selectedRow} muted={muted} editing={editing} onMute={(id) => setMuted((current) => { const next = new Set(current); next.has(id) ? next.delete(id) : next.add(id); return next })} onSelect={(id, row) => { setSelectedChannel(id); setSelectedRow(row) }} onClear={(id, row) => setNote(id, row, null)} />
           ) : (
             <PianoRoll project={project} channelId={selectedChannel} selectedRow={selectedRow} editing={editing} onChannel={setSelectedChannel} onSetNote={setNote} />
           )}
@@ -361,15 +363,10 @@ function App() {
               <label>Volume <input type="range" min="0" max="15" value={selectedCell.volume ?? 15} onChange={(event) => commit((draft) => { draft.cells[selectedChannel][selectedRow].volume = Number(event.target.value) })} /><output>{(selectedCell.volume ?? 15).toString(16).toUpperCase()}</output></label>
               <label>Effect <input aria-label="Effect command" value={selectedCell.effect} maxLength={3} placeholder="0xy" onChange={(event) => { const value = event.target.value.toUpperCase().replace(/[^0-9A-FP-Z]/g, '').slice(0, 3); commit((draft) => { draft.cells[selectedChannel][selectedRow].effect = value }) }} /></label>
             </div>
-            <p><kbd>A–K</kbd> enter notes · <kbd>Z/X</kbd> octave · <kbd>Del</kbd> clear · <kbd>Space</kbd> play</p></> : <div className="view-mode-copy"><strong>Playing the recovered source timeline</strong><span>Press “Edit in browser” to make a working copy. Nothing downloads until you choose Export.</span></div>}
+            <p><kbd>A–K</kbd> enter notes · <kbd>Z/X</kbd> octave · <kbd>Del</kbd> clear · <kbd>Space</kbd> play</p></> : <div className="view-mode-copy"><strong>Fixed playhead · moving pattern</strong><span>Press Play to follow the recovered grid in time with the original recording.</span></div>}
           </div>
         </section>
-
-        <section className="export-panel workspace-panel">
-          <div><p className="eyebrow">Online workspace</p><h3>Edit first. Export only when you want it.</h3><p>The tracker runs entirely in the page and saves working copies in this browser. Cross-device cloud sync is the next backend step; it is not being falsely presented as active.</p></div>
-          <div className="workspace-actions"><button className="primary-action" onClick={() => setEditMode(true)}><span>Open editor</span><small>interactive browser workspace</small></button><button onClick={saveWorkspace}><span>Save working copy</span><small>persistent in this browser</small></button><button className="danger-action" onClick={reset}><span>Fresh draft</span><small>clear local pattern</small></button></div>
-          <input ref={importRef} type="file" accept=".json,.txt" hidden onChange={(event) => { const file = event.target.files?.[0]; if (file) void onImport(file); event.target.value = '' }} />
-        </section>
+        <input ref={importRef} type="file" accept=".json,.txt" hidden onChange={(event) => { const file = event.target.files?.[0]; if (file) void onImport(file); event.target.value = '' }} />
         <footer><span>{message}</span><span>Built for preservation · no analytics · data stays local</span></footer>
       </main>
 
@@ -378,9 +375,12 @@ function App() {
   )
 }
 
-function TrackerGrid({ project, playhead, selectedChannel, selectedRow, muted, editing, onMute, onSelect, onClear }: {
+function TrackerGrid({ project, playhead, referenceAudioRef, referencePlaying, chipPlaying, selectedChannel, selectedRow, muted, editing, onMute, onSelect, onClear }: {
   project: TrackerProject
   playhead: number
+  referenceAudioRef: React.RefObject<HTMLAudioElement | null>
+  referencePlaying: boolean
+  chipPlaying: boolean
   selectedChannel: ChannelId
   selectedRow: number
   muted: Set<ChannelId>
@@ -390,19 +390,57 @@ function TrackerGrid({ project, playhead, selectedChannel, selectedRow, muted, e
   onClear: (id: ChannelId, row: number) => void
 }) {
   const scrollRef = useRef<HTMLDivElement>(null)
-  const activeRowRef = useRef<HTMLTableRowElement>(null)
-  useEffect(() => {
+  const firstRowRef = useRef<HTMLTableRowElement>(null)
+  const playheadRef = useRef<HTMLDivElement>(null)
+
+  const updatePosition = useCallback((position: number, smooth = false) => {
     const container = scrollRef.current
-    const row = activeRowRef.current
-    if (!container || !row) return
-    container.scrollTop = row.offsetTop - (container.clientHeight - row.clientHeight) / 2
-  }, [playhead])
+    const firstRow = firstRowRef.current
+    if (!container || !firstRow) return
+    const rowHeight = firstRow.offsetHeight
+    const headerHeight = 50
+    const viewportCentre = headerHeight + (container.clientHeight - headerHeight) / 2
+    const top = firstRow.offsetTop + position * rowHeight + rowHeight / 2 - viewportCentre
+    const reduceMotion = window.matchMedia('(prefers-reduced-motion: reduce)').matches
+    container.scrollTo({ top, behavior: smooth && !reduceMotion ? 'smooth' : 'auto' })
+    const row = Math.floor(position) % project.rows
+    const order = Math.floor(row / project.patternLength).toString(16).padStart(2, '0').toUpperCase()
+    const patternRow = (row % project.patternLength).toString(16).padStart(2, '0').toUpperCase()
+    if (playheadRef.current) {
+      playheadRef.current.dataset.position = position.toFixed(3)
+      const label = playheadRef.current.querySelector('span')
+      if (label) label.textContent = `${order}:${patternRow}`
+    }
+  }, [project.patternLength, project.rows])
+
+  useEffect(() => {
+    const reduceMotion = window.matchMedia('(prefers-reduced-motion: reduce)').matches
+    if (!referencePlaying || reduceMotion) updatePosition(playhead, chipPlaying)
+  }, [chipPlaying, playhead, referencePlaying, updatePosition])
+
+  useEffect(() => {
+    const sync = project.sourceSync
+    if (!referencePlaying || !sync) return
+    if (window.matchMedia('(prefers-reduced-motion: reduce)').matches) return
+    let frame = 0
+    const animate = () => {
+      const audio = referenceAudioRef.current
+      if (!audio) return
+      const elapsed = Math.max(0, audio.currentTime - sync.audioOffset)
+      updatePosition((elapsed / sync.secondsPerRow) % sync.loopRows)
+      frame = window.requestAnimationFrame(animate)
+    }
+    frame = window.requestAnimationFrame(animate)
+    return () => window.cancelAnimationFrame(frame)
+  }, [project.sourceSync, referenceAudioRef, referencePlaying, updatePosition])
+
   return (
-    <div className="tracker-scroll" ref={scrollRef}>
+    <div className={`tracker-scroll ${referencePlaying || chipPlaying ? 'is-playing' : ''}`} ref={scrollRef}>
+      <div className="tracker-playhead" ref={playheadRef} data-position={playhead.toFixed(3)} aria-hidden="true"><i /><span>00:00</span></div>
       <table className="tracker-table">
         <thead><tr><th>ROW</th>{channels.map((channel) => <th key={channel.id} style={{ '--channel': channel.color } as React.CSSProperties}><button onClick={() => onMute(channel.id)} className={muted.has(channel.id) ? 'muted' : ''}><span>{channel.short}</span><small>{muted.has(channel.id) ? 'muted' : channel.name}</small></button></th>)}</tr></thead>
-        <tbody>{Array.from({ length: project.rows }, (_, row) => (
-          <tr key={row} ref={playhead === row ? activeRowRef : undefined} className={playhead === row ? 'playing-row' : ''}>
+        <tbody><tr className="tracker-spacer-row" aria-hidden="true"><td colSpan={channels.length + 1} /></tr>{Array.from({ length: project.rows }, (_, row) => (
+          <tr key={row} ref={row === 0 ? firstRowRef : undefined} className={playhead === row ? 'playing-row' : ''}>
             <th>{Math.floor(row / project.patternLength).toString(16).padStart(2, '0').toUpperCase()}:{(row % project.patternLength).toString(16).padStart(2, '0').toUpperCase()}</th>
             {channels.map((channel) => {
               const cell = project.cells[channel.id][row]
@@ -410,7 +448,7 @@ function TrackerGrid({ project, playhead, selectedChannel, selectedRow, muted, e
               return <td key={channel.id}><button className={selected ? 'selected-cell' : ''} onClick={() => onSelect(channel.id, row)} onDoubleClick={() => { if (editing) onClear(channel.id, row) }} onContextMenu={(event) => { if (editing) { event.preventDefault(); onClear(channel.id, row) } }}><b>{cell.note ?? '···'}</b><span>{cell.note && cell.instrument !== null ? cell.instrument.toString(16).padStart(2, '0').toUpperCase() : '··'} {cell.note && cell.volume !== null ? cell.volume.toString(16).toUpperCase() : '·'} {cell.effect || '···'}</span></button></td>
             })}
           </tr>
-        ))}</tbody>
+        ))}<tr className="tracker-spacer-row" aria-hidden="true"><td colSpan={channels.length + 1} /></tr></tbody>
       </table>
     </div>
   )
