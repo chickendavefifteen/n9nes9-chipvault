@@ -1,0 +1,19 @@
+﻿{
+    "build":  "2026-07-18.4",
+    "previousIndexAssets":  [
+                                "assets/index-CBgRcmEp.js",
+                                "assets/index-VbQCktWD.css"
+                            ],
+    "currentIndexAssets":  [
+                               "assets/index-COejueBs.js",
+                               "assets/index-DcEJmeUv.css"
+                           ],
+    "retainedAssets":  [
+                           "assets/index-CBgRcmEp.js",
+                           "assets/index-COejueBs.js",
+                           "assets/index-DcEJmeUv.css",
+                           "assets/index-pLxO6WMF.js",
+                           "assets/index-u18Q126i.css",
+                           "assets/index-VbQCktWD.css"
+                       ]
+}
