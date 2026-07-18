@@ -12,8 +12,18 @@ import {
   parseProject,
   serializeProject,
 } from './lib/project'
-import { BUILD_ID, fetchBuildManifest, shouldReloadBuild } from './lib/versioning'
+import { buildUpdateAction, BUILD_ID, fetchBuildManifest } from './lib/versioning'
 import { browserStorage, safeStorageGet, safeStorageSet } from './lib/reliability'
+import {
+  createPlaybackSignal,
+  isPlaybackSignal,
+  PLAYBACK_SIGNAL_KEY,
+  shouldRestartSource,
+  SOURCE_STALL_GRACE_MS,
+  sourceLoopStart,
+  sourceNeedsFallback,
+  sourceRowPosition,
+} from './lib/playback'
 import type { ChannelId, LibraryTrack, TrackerProject } from './types'
 
 type ViewMode = 'tracker' | 'piano'
@@ -54,6 +64,7 @@ function App() {
   const [selectedRow, setSelectedRow] = useState(0)
   const [octave, setOctave] = useState(4)
   const [playing, setPlaying] = useState(false)
+  const [referenceStarting, setReferenceStarting] = useState(false)
   const [referencePlaying, setReferencePlaying] = useState(false)
   const [editing, setEditing] = useState(false)
   const [playhead, setPlayhead] = useState(0)
@@ -65,6 +76,13 @@ function App() {
   const importRef = useRef<HTMLInputElement>(null)
   const audioRef = useRef<HTMLAudioElement>(null)
   const timerRef = useRef<number | null>(null)
+  const sourceAttemptRef = useRef(0)
+  const sourceWatchdogRef = useRef<number | null>(null)
+  const playbackChannelRef = useRef<BroadcastChannel | null>(null)
+  const tabIdRef = useRef(`tab-${Date.now().toString(36)}-${Math.random().toString(36).slice(2)}`)
+  const playbackActiveRef = useRef(false)
+  const editingRef = useRef(editing)
+  const storageHealthyRef = useRef(storageHealthy)
 
   const filtered = useMemo(() => library.filter((track) => {
     const matchesFilter = filter === 'all' || track.kind === filter
@@ -75,6 +93,15 @@ function App() {
   const editedCount = useMemo(() => channels.reduce((total, channel) => (
     total + project.cells[channel.id].filter((cell) => cell.edited).length
   ), 0), [project])
+  const referenceActive = referenceStarting || referencePlaying
+  const playbackActive = playing || referenceActive
+  const transportMode = playing ? 'chip-fallback' : referencePlaying ? 'source-playing' : referenceStarting ? 'source-starting' : 'idle'
+
+  useEffect(() => {
+    playbackActiveRef.current = playbackActive
+    editingRef.current = editing
+    storageHealthyRef.current = storageHealthy
+  }, [editing, playbackActive, storageHealthy])
 
   const commit = useCallback((mutate: (draft: TrackerProject) => void) => {
     setProject((current) => {
@@ -95,10 +122,18 @@ function App() {
     if (nextMessage) setMessage(nextMessage)
   }, [])
 
-  const pauseReference = useCallback(() => {
-    audioRef.current?.pause()
-    setReferencePlaying(false)
+  const clearSourceWatchdog = useCallback(() => {
+    if (sourceWatchdogRef.current !== null) window.clearTimeout(sourceWatchdogRef.current)
+    sourceWatchdogRef.current = null
   }, [])
+
+  const pauseReference = useCallback(() => {
+    sourceAttemptRef.current += 1
+    clearSourceWatchdog()
+    audioRef.current?.pause()
+    setReferenceStarting(false)
+    setReferencePlaying(false)
+  }, [clearSourceWatchdog])
 
   const stopEverything = useCallback((nextMessage?: string) => {
     stopChip()
@@ -106,17 +141,23 @@ function App() {
     if (nextMessage) setMessage(nextMessage)
   }, [pauseReference, stopChip])
 
+  const broadcastPlayback = useCallback(() => {
+    const signal = createPlaybackSignal(tabIdRef.current, BUILD_ID)
+    playbackChannelRef.current?.postMessage(signal)
+    safeStorageSet(browserStorage(), PLAYBACK_SIGNAL_KEY, JSON.stringify(signal))
+  }, [])
+
   const syncReference = useCallback(() => {
     const audio = audioRef.current
-    const sync = project.sourceSync
-    if (!audio || !sync) return
-    const elapsed = Math.max(0, audio.currentTime - sync.audioOffset)
-    setPlayhead(Math.floor(elapsed / sync.secondsPerRow) % sync.loopRows)
-  }, [project.sourceSync])
+    if (!audio) return
+    setPlayhead(Math.floor(sourceRowPosition(audio.currentTime, project.sourceSync, project.tempo, project.rows)))
+  }, [project.rows, project.sourceSync, project.tempo])
 
-  const start = useCallback(() => {
-    if (playing) { stopChip('Stopped'); return }
+  const startChip = useCallback((nextMessage = 'Playing chip preview') => {
+    stopChip()
     pauseReference()
+    broadcastPlayback()
+    void engine.unlock()
     const rowDuration = 60 / project.tempo / 4
     let row = playhead
     const tick = () => {
@@ -133,8 +174,61 @@ function App() {
     tick()
     timerRef.current = window.setInterval(tick, rowDuration * 1000)
     setPlaying(true)
-    setMessage('Playing chip preview')
-  }, [muted, pauseReference, playhead, playing, project, stopChip])
+    setMessage(nextMessage)
+  }, [broadcastPlayback, muted, pauseReference, playhead, project, stopChip])
+
+  const armSourceWatchdog = useCallback((attempt: number, initialTime: number) => {
+    clearSourceWatchdog()
+    const startedAt = Date.now()
+    sourceWatchdogRef.current = window.setTimeout(() => {
+      if (sourceAttemptRef.current !== attempt) return
+      const audio = audioRef.current
+      if (!audio || sourceNeedsFallback({
+        elapsedMs: Date.now() - startedAt,
+        initialTime,
+        currentTime: audio.currentTime,
+        paused: audio.paused,
+        readyState: audio.readyState,
+      })) {
+        startChip('Source audio stalled — chip fallback active')
+        return
+      }
+      setReferenceStarting(false)
+      setReferencePlaying(true)
+      setMessage('Playing original recording')
+    }, SOURCE_STALL_GRACE_MS)
+  }, [clearSourceWatchdog, startChip])
+
+  const beginSourcePlayback = useCallback((looping = false) => {
+    const audio = audioRef.current
+    if (!audio) {
+      startChip('Source audio unavailable — chip fallback active')
+      return
+    }
+    stopChip()
+    clearSourceWatchdog()
+    const attempt = sourceAttemptRef.current + 1
+    sourceAttemptRef.current = attempt
+    setReferenceStarting(true)
+    setReferencePlaying(false)
+    setMessage(looping ? 'Looping original recording' : 'Starting original recording…')
+    broadcastPlayback()
+    void engine.unlock()
+    const offset = sourceLoopStart(project.sourceSync)
+    if (looping || audio.ended || (Number.isFinite(audio.duration) && audio.currentTime >= audio.duration - 0.05) || audio.currentTime < offset) {
+      audio.currentTime = offset
+    }
+    const initialTime = audio.currentTime
+    try {
+      void Promise.resolve(audio.play()).then(() => {
+        if (sourceAttemptRef.current === attempt) armSourceWatchdog(attempt, initialTime)
+      }).catch(() => {
+        if (sourceAttemptRef.current === attempt) startChip('Source audio was blocked — chip fallback active')
+      })
+    } catch {
+      if (sourceAttemptRef.current === attempt) startChip('Source audio was blocked — chip fallback active')
+    }
+  }, [armSourceWatchdog, broadcastPlayback, clearSourceWatchdog, project.sourceSync, startChip, stopChip])
 
   const selectTrack = (track: LibraryTrack) => {
     if (track.id === selectedId) return
@@ -161,14 +255,58 @@ function App() {
   useEffect(() => () => stopEverything(), [stopEverything])
 
   useEffect(() => {
+    const handleSignal = (value: unknown) => {
+      if (!isPlaybackSignal(value) || value.tabId === tabIdRef.current || !playbackActiveRef.current) return
+      stopEverything('Paused because another Chipvault tab started playback')
+    }
+    let channel: BroadcastChannel | null = null
+    try {
+      if (typeof BroadcastChannel !== 'undefined') {
+        channel = new BroadcastChannel('n9nes9-chipvault-playback')
+        channel.onmessage = (event) => handleSignal(event.data)
+        playbackChannelRef.current = channel
+      }
+    } catch {
+      playbackChannelRef.current = null
+    }
+    const onStorage = (event: StorageEvent) => {
+      if (event.key !== PLAYBACK_SIGNAL_KEY || !event.newValue) return
+      try { handleSignal(JSON.parse(event.newValue)) } catch { /* ignore malformed cross-tab data */ }
+    }
+    window.addEventListener('storage', onStorage)
+    return () => {
+      window.removeEventListener('storage', onStorage)
+      channel?.close()
+      if (playbackChannelRef.current === channel) playbackChannelRef.current = null
+    }
+  }, [stopEverything])
+
+  useEffect(() => {
     let disposed = false
     const checkForUpdate = async () => {
       const manifest = await fetchBuildManifest(import.meta.env.BASE_URL)
-      if (!disposed && shouldReloadBuild(manifest?.build)) setUpdateReady(true)
+      if (disposed) return
+      const action = buildUpdateAction(manifest?.build, {
+        playbackActive: playbackActiveRef.current,
+        editing: editingRef.current,
+        storageHealthy: storageHealthyRef.current,
+      })
+      if (action === 'reload' && manifest?.build) {
+        const url = new URL(window.location.href)
+        if (url.searchParams.get('build') === manifest.build) {
+          setUpdateReady(true)
+        } else {
+          url.searchParams.set('build', manifest.build)
+          window.location.replace(url)
+        }
+      } else if (action === 'notify') {
+        setUpdateReady(true)
+      }
     }
     const reconcileReferenceState = () => {
       const audio = audioRef.current
       const active = Boolean(audio && !audio.paused && !audio.ended)
+      if (active) setReferenceStarting(false)
       setReferencePlaying((current) => current === active ? current : active)
     }
     const onVisibilityChange = () => {
@@ -184,15 +322,21 @@ function App() {
       if (event.persisted) stopEverything('Restored safely from browser history')
       void checkForUpdate()
     }
+    const onFocus = () => { void checkForUpdate() }
+    const onOnline = () => { void checkForUpdate() }
     document.addEventListener('visibilitychange', onVisibilityChange)
     window.addEventListener('pageshow', onPageShow)
-    const updateInterval = window.setInterval(() => { if (!document.hidden) void checkForUpdate() }, 300_000)
-    const mediaInterval = window.setInterval(() => { if (!document.hidden) reconcileReferenceState() }, 1_000)
+    window.addEventListener('focus', onFocus)
+    window.addEventListener('online', onOnline)
+    const updateInterval = window.setInterval(() => { if (!document.hidden) void checkForUpdate() }, 30_000)
+    const mediaInterval = window.setInterval(() => { if (!document.hidden) reconcileReferenceState() }, 500)
     void checkForUpdate()
     return () => {
       disposed = true
       document.removeEventListener('visibilitychange', onVisibilityChange)
       window.removeEventListener('pageshow', onPageShow)
+      window.removeEventListener('focus', onFocus)
+      window.removeEventListener('online', onOnline)
       window.clearInterval(updateInterval)
       window.clearInterval(mediaInterval)
     }
@@ -276,24 +420,58 @@ function App() {
     setMessage('Downloaded FamiTracker text module')
   }
 
+  const handleReferencePlaying = () => {
+    clearSourceWatchdog()
+    stopChip()
+    setReferenceStarting(false)
+    setReferencePlaying(true)
+    broadcastPlayback()
+    setMessage('Playing original recording')
+  }
+
+  const handleReferencePause = () => {
+    sourceAttemptRef.current += 1
+    clearSourceWatchdog()
+    setReferenceStarting(false)
+    setReferencePlaying(false)
+  }
+
+  const handleReferenceWaiting = () => {
+    if (!referenceActive) return
+    const audio = audioRef.current
+    if (!audio) return
+    setMessage('Buffering original recording…')
+    armSourceWatchdog(sourceAttemptRef.current, audio.currentTime)
+  }
+
+  const handleReferenceEnded = () => {
+    clearSourceWatchdog()
+    setReferenceStarting(false)
+    setReferencePlaying(false)
+    if (shouldRestartSource(project.loop, document.hidden) && !editing) {
+      beginSourcePlayback(true)
+    } else {
+      sourceAttemptRef.current += 1
+      setMessage('Recording finished')
+    }
+  }
+
+  const handleReferenceError = () => {
+    if (referenceActive) startChip('Source audio failed — chip fallback active')
+    else setMessage('Source recording could not load in this browser')
+  }
+
   function toggleTransport() {
     if (selectedTrack.externalVideoId) {
       setMessage('Use the official YouTube controls for the bonus session')
       return
     }
-    if (!editing && audioRef.current) {
-      if (audioRef.current.paused) {
-        if (project.sourceSync && audioRef.current.currentTime < project.sourceSync.audioOffset) audioRef.current.currentTime = project.sourceSync.audioOffset
-        void audioRef.current.play().catch(() => {
-          setReferencePlaying(false)
-          setMessage('This browser blocked source playback; use its audio controls or the original upload')
-        })
-      } else {
-        audioRef.current.pause()
-      }
+    if (playbackActive) {
+      stopEverything('Paused')
       return
     }
-    start()
+    if (!editing && audioRef.current) beginSourcePlayback()
+    else startChip()
   }
 
   const setEditMode = (next: boolean) => {
@@ -388,7 +566,7 @@ function App() {
               <details className="export-menu mode-export"><summary>Export</summary><div><button onClick={exportNative}>Chipvault JSON</button><button onClick={exportFami}>FamiTracker TXT</button>{selectedTrack.audio && <a href={asset(selectedTrack.audio)} download={`${selectedTrack.slug}.m4a`}>Source audio M4A</a>}<button onClick={() => importRef.current?.click()}>Import project</button>{editing && <button className="danger-action" onClick={reset}>Reset edits</button>}</div></details>
             </div>}
             {selectedTrack.audio && <div className="source-player">
-              <audio ref={audioRef} key={selectedTrack.id} src={asset(selectedTrack.audio)} controls preload="metadata" onPlay={() => { stopChip(); setReferencePlaying(true); setMessage('Playing original recording') }} onPause={() => setReferencePlaying(false)} onEnded={() => { setReferencePlaying(false); setMessage('Recording finished') }} onTimeUpdate={syncReference} />
+              <audio ref={audioRef} key={selectedTrack.id} src={asset(selectedTrack.audio)} controls preload="auto" playsInline onPlaying={handleReferencePlaying} onPause={handleReferencePause} onWaiting={handleReferenceWaiting} onStalled={handleReferenceWaiting} onEnded={handleReferenceEnded} onError={handleReferenceError} onTimeUpdate={syncReference} />
               <a className="youtube-link" href={selectedTrack.sourceUrl} target="_blank" rel="noreferrer">Original upload ↗</a>
             </div>}
             {selectedTrack.externalVideoId && <div className="bonus-source"><span>Official external stream</span><a href={selectedTrack.sourceUrl} target="_blank" rel="noreferrer">Open on YouTube ↗</a></div>}
@@ -410,10 +588,10 @@ function App() {
           <button onClick={() => setAboutOpen(true)}>Why?</button>
         </section>
 
-        <section className="workbench">
+        <section className="workbench" data-transport={transportMode}>
           <div className="transport-bar">
             <div className="transport-buttons">
-              <button className="play-button" onClick={toggleTransport} aria-label={(playing || referencePlaying) ? 'Pause playback' : 'Play tracker'}>{(playing || referencePlaying) ? '■' : '▶'}</button>
+              <button className="play-button" onClick={toggleTransport} aria-label={playbackActive ? 'Pause playback' : 'Play tracker'}>{playbackActive ? '■' : '▶'}</button>
               <button onClick={returnToStart} aria-label="Return to first row">↤</button>
             </div>
             <label>BPM<input type="number" min="32" max="300" disabled={!editing} value={project.tempo} onChange={(event) => commit((draft) => { draft.tempo = Number(event.target.value) })} /></label>
@@ -435,7 +613,7 @@ function App() {
           </div>
 
           {view === 'tracker' ? (
-            <TrackerGrid project={project} playhead={playhead} referenceAudioRef={audioRef} referencePlaying={referencePlaying} chipPlaying={playing} selectedChannel={selectedChannel} selectedRow={selectedRow} muted={muted} editing={editing} onMute={(id) => setMuted((current) => { const next = new Set(current); next.has(id) ? next.delete(id) : next.add(id); return next })} onSelect={(id, row) => { setSelectedChannel(id); setSelectedRow(row) }} onClear={(id, row) => setNote(id, row, null)} />
+            <TrackerGrid project={project} playhead={playhead} referenceAudioRef={audioRef} referenceActive={referenceActive} chipPlaying={playing} selectedChannel={selectedChannel} selectedRow={selectedRow} muted={muted} editing={editing} onMute={(id) => setMuted((current) => { const next = new Set(current); next.has(id) ? next.delete(id) : next.add(id); return next })} onSelect={(id, row) => { setSelectedChannel(id); setSelectedRow(row) }} onClear={(id, row) => setNote(id, row, null)} />
           ) : (
             <PianoRoll project={project} channelId={selectedChannel} selectedRow={selectedRow} editing={editing} onChannel={setSelectedChannel} onSetNote={setNote} />
           )}
@@ -464,11 +642,11 @@ function App() {
   )
 }
 
-function TrackerGrid({ project, playhead, referenceAudioRef, referencePlaying, chipPlaying, selectedChannel, selectedRow, muted, editing, onMute, onSelect, onClear }: {
+function TrackerGrid({ project, playhead, referenceAudioRef, referenceActive, chipPlaying, selectedChannel, selectedRow, muted, editing, onMute, onSelect, onClear }: {
   project: TrackerProject
   playhead: number
   referenceAudioRef: React.RefObject<HTMLAudioElement | null>
-  referencePlaying: boolean
+  referenceActive: boolean
   chipPlaying: boolean
   selectedChannel: ChannelId
   selectedRow: number
@@ -504,27 +682,25 @@ function TrackerGrid({ project, playhead, referenceAudioRef, referencePlaying, c
 
   useEffect(() => {
     const reduceMotion = window.matchMedia('(prefers-reduced-motion: reduce)').matches
-    if (!referencePlaying || reduceMotion) updatePosition(playhead, chipPlaying)
-  }, [chipPlaying, playhead, referencePlaying, updatePosition])
+    if (!referenceActive || reduceMotion) updatePosition(playhead, chipPlaying)
+  }, [chipPlaying, playhead, referenceActive, updatePosition])
 
   useEffect(() => {
-    const sync = project.sourceSync
-    if (!referencePlaying || !sync) return
+    if (!referenceActive) return
     if (window.matchMedia('(prefers-reduced-motion: reduce)').matches) return
     let frame = 0
     const animate = () => {
       const audio = referenceAudioRef.current
       if (!audio) return
-      const elapsed = Math.max(0, audio.currentTime - sync.audioOffset)
-      updatePosition((elapsed / sync.secondsPerRow) % sync.loopRows)
+      updatePosition(sourceRowPosition(audio.currentTime, project.sourceSync, project.tempo, project.rows))
       frame = window.requestAnimationFrame(animate)
     }
     frame = window.requestAnimationFrame(animate)
     return () => window.cancelAnimationFrame(frame)
-  }, [project.sourceSync, referenceAudioRef, referencePlaying, updatePosition])
+  }, [project.rows, project.sourceSync, project.tempo, referenceActive, referenceAudioRef, updatePosition])
 
   return (
-    <div className={`tracker-scroll ${referencePlaying || chipPlaying ? 'is-playing' : ''}`} ref={scrollRef}>
+    <div className={`tracker-scroll ${referenceActive || chipPlaying ? 'is-playing' : ''}`} ref={scrollRef}>
       <div className="tracker-playhead" ref={playheadRef} data-position={playhead.toFixed(3)} aria-hidden="true"><i /><span>00:00</span></div>
       <table className="tracker-table">
         <thead><tr><th>ROW</th>{channels.map((channel) => <th key={channel.id} style={{ '--channel': channel.color } as React.CSSProperties}><button onClick={() => onMute(channel.id)} className={muted.has(channel.id) ? 'muted' : ''}><span>{channel.short}</span><small>{muted.has(channel.id) ? 'muted' : channel.name}</small></button></th>)}</tr></thead>

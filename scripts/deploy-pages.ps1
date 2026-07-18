@@ -29,7 +29,9 @@ function Get-HashedAssetRefs([string]$HtmlPath) {
 
 $repo = (Resolve-Path -LiteralPath $RepoRoot).Path
 $dist = Join-Path $repo 'dist'
+$legacyConfigPath = Join-Path $repo 'scripts\legacy-pages-assets.json'
 if (-not (Test-Path -LiteralPath (Join-Path $repo '.git'))) { throw 'RepoRoot is not a Git checkout.' }
+if (-not (Test-Path -LiteralPath $legacyConfigPath -PathType Leaf)) { throw 'scripts/legacy-pages-assets.json is missing.' }
 
 if (-not $SkipChecks) {
   Invoke-Checked 'npm.cmd' @('test') $repo
@@ -51,7 +53,29 @@ try {
 
   Get-ChildItem -LiteralPath $dist -Force | Copy-Item -Destination $checkout -Recurse -Force
   $currentRefs = @(Get-HashedAssetRefs (Join-Path $checkout 'index.html'))
-  $requiredRefs = @($previousRefs + $currentRefs | Sort-Object -Unique)
+  $currentJavaScript = @($currentRefs | Where-Object { $_.EndsWith('.js', [System.StringComparison]::OrdinalIgnoreCase) })
+  $currentStylesheet = @($currentRefs | Where-Object { $_.EndsWith('.css', [System.StringComparison]::OrdinalIgnoreCase) })
+  if ($currentJavaScript.Count -ne 1 -or $currentStylesheet.Count -ne 1) {
+    throw 'Expected exactly one current JavaScript and one current stylesheet entrypoint.'
+  }
+
+  $legacyConfig = Get-Content -Raw $legacyConfigPath | ConvertFrom-Json
+  $configuredAliases = @($legacyConfig.javascript) + @($legacyConfig.stylesheets)
+  $existingAliases = @(Get-ChildItem -LiteralPath (Join-Path $checkout 'assets') -File -Filter 'index-*' |
+    Where-Object { $_.Extension -in @('.js', '.css') } |
+    ForEach-Object { "assets/$($_.Name)" })
+  $legacyAliases = @($configuredAliases + $existingAliases | Sort-Object -Unique)
+
+  foreach ($alias in $legacyAliases) {
+    if ($alias -notmatch '^assets/index-[^/]+\.(?:js|css)$') { throw "Invalid legacy asset alias: $alias" }
+    $sourceRef = if ($alias.EndsWith('.js', [System.StringComparison]::OrdinalIgnoreCase)) { $currentJavaScript[0] } else { $currentStylesheet[0] }
+    if ($alias -eq $sourceRef) { continue }
+    $sourcePath = Join-Path $checkout ($sourceRef -replace '/', [System.IO.Path]::DirectorySeparatorChar)
+    $aliasPath = Join-Path $checkout ($alias -replace '/', [System.IO.Path]::DirectorySeparatorChar)
+    Copy-Item -LiteralPath $sourcePath -Destination $aliasPath -Force
+  }
+
+  $requiredRefs = @($previousRefs + $currentRefs + $legacyAliases | Sort-Object -Unique)
 
   foreach ($ref in $requiredRefs) {
     $candidate = Join-Path $checkout ($ref -replace '/', [System.IO.Path]::DirectorySeparatorChar)
@@ -68,6 +92,7 @@ try {
     build = $build
     previousIndexAssets = $previousRefs
     currentIndexAssets = $currentRefs
+    aliasedEntrypoints = $legacyAliases
     retainedAssets = $retainedAssets
   }
   $compatibilityJson = $compatibility | ConvertTo-Json -Depth 3
@@ -80,6 +105,7 @@ try {
     Write-Output ("DRY_RUN_BUILD=" + $build)
     Write-Output ("PREVIOUS_INDEX_ASSETS=" + $previousRefs.Count)
     Write-Output ("CURRENT_INDEX_ASSETS=" + $currentRefs.Count)
+    Write-Output ("ALIASED_ENTRYPOINTS=" + $legacyAliases.Count)
     Write-Output ("RETAINED_ASSETS=" + $retainedAssets.Count)
   }
   elseif (-not $changes) {

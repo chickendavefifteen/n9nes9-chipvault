@@ -41,6 +41,11 @@ A static, offline-capable archive and modern browser tracker for the music uploa
 - R20: Never force-replace the Pages branch with an asset-pruning orphan commit. Deploy by overlaying the tested build onto the existing branch, verify both previous and current HTML asset references, then push normally.
 - R21: Denied or unavailable browser storage must degrade to an in-memory workspace with a visible warning rather than preventing the React application from starting.
 - R22: Support current Chrome, Edge, Firefox, and Safari with an ES2019 production target, avoid unsupported runtime-only conveniences where a simple compatible equivalent exists, and render a useful static/error fallback instead of a blank page.
+- R23: Source playback and tracker animation must share one explicit transport lifecycle. Starting, playing, buffering, pausing, ending, looping, media failure, mode changes, track changes, and tab restoration must never leave the button, audio element, message, or animation disagreeing.
+- R24: If source audio is rejected or stops advancing, automatically fall back to the chip engine after a bounded grace period; unlock that engine during the original user gesture so the fallback can still produce sound.
+- R25: View-mode animation must follow source time for every local recording. Recovered projects use their measured source timing; unrecovered drafts use their declared tracker tempo and remain clearly labelled as drafts.
+- R26: Only one current Chipvault tab may play at once. Current tabs coordinate with BroadcastChannel plus a storage-event fallback, and a newer idle build reloads itself on focus, visibility return, page restore, online recovery, or the bounded manifest poll.
+- R27: Every historical hashed entrypoint observed in deployed or still-open tabs must remain resolvable. Cache-safe deployment aliases historical JS/CSS names to the newly tested bundle so stale HTML cannot revive obsolete playback code.
 
 ## Acceptance checks
 
@@ -62,6 +67,12 @@ A static, offline-capable archive and modern browser tracker for the music uploa
 - C16: The deploy script fails before pushing if an asset referenced by either the previous or current HTML is absent from the candidate Pages tree.
 - C17: Unit tests prove storage read/write failures are contained, project cloning works without `structuredClone`, and stale/current HTML asset references are extracted correctly.
 - C18: Production build, cold-root browser boot, source playback, fixed-playhead motion, editing, track/mode switching, and the external bonus pass with no uncaught browser errors.
+- C19: Unit tests prove source position for recovered and draft projects, bounded stall detection, visible-loop restart, cross-tab signal validation, and safe reload-vs-notify update decisions.
+- C20: Browser tests prove six consecutive pause/resume cycles keep media, transport label, moving rows, and fixed playhead coherent.
+- C21: Browser tests force source playback to its end and prove Loop restarts both sound and animation instead of leaving an ended or stale-playing state.
+- C22: Browser tests prove a stalled/rejected source enters audible chip fallback and that switching mode, track, or active tab leaves no orphaned playback.
+- C23: Reload tests cover every open historical tab and at least ten cold/current reloads; each must boot the current build with no startup or console error.
+- C24: Deployment proof returns HTTP 200 for every current, previous, and historical entrypoint, and byte hashes prove all historical aliases contain the current tested JS/CSS bundle.
 
 ## Out of scope for this recovery pass
 

@@ -36,7 +36,9 @@ Deploy only with:
 npm run deploy:pages
 ```
 
-The deploy command tests and builds first, overlays `dist` onto the existing `gh-pages` branch, and refuses to push if either the previous or current HTML references a missing hashed asset. Do not force-replace the Pages branch: GitHub caches HTML for ten minutes, so deleting an older hash can blank browsers that still hold the previous HTML.
+The deploy command tests and builds first, overlays `dist` onto the existing `gh-pages` branch, and refuses to push if the previous, current, or known historical HTML references a missing hashed asset. Historical entrypoint names are refreshed with the current tested bundle, so reloading an old cached page cannot revive obsolete playback code. Do not force-replace the Pages branch: GitHub caches HTML for ten minutes, so deleting an older hash can blank browsers that still hold the previous HTML.
+
+Playback is intentionally single-tab: starting sound in one current Chipvault tab pauses any other current tab. Source audio drives the tracker animation for every recording, loops when Loop is enabled, and falls back to the already-unlocked chip engine if browser media playback is rejected or stalls.
 
 The published site is served from the generated `gh-pages` branch. The editable source remains on the source branch and is reviewed through a pull request.
 

@@ -4,7 +4,7 @@ import { resolve } from 'node:path'
 import { library, tutorials } from '../data/library'
 import { recoveredProjectForTrack } from '../data/recovered'
 import { createDraft, exportFamiTrackerText, importFamiTrackerText, parseProject, serializeProject } from './project'
-import { BUILD_ID, shouldReloadBuild } from './versioning'
+import { buildUpdateAction, BUILD_ID, isNewerBuild, shouldReloadBuild } from './versioning'
 
 describe('Chipvault project interchange', () => {
   it('has a complete, unique 17-recording archive, external bonus, and both tutorials', () => {
@@ -36,9 +36,14 @@ describe('Chipvault project interchange', () => {
   it('reloads only when the no-cache manifest is newer', () => {
     expect(BUILD_ID).toMatch(/^\d{4}-\d{2}-\d{2}\.\d+$/)
     expect(shouldReloadBuild(BUILD_ID)).toBe(false)
-    expect(shouldReloadBuild('2026-07-18.3')).toBe(false)
-    expect(shouldReloadBuild('2026-07-18.5')).toBe(true)
+    expect(shouldReloadBuild('2026-07-18.4')).toBe(false)
+    expect(shouldReloadBuild('2026-07-18.6')).toBe(true)
     expect(shouldReloadBuild('broken')).toBe(false)
+    expect(isNewerBuild('2026-07-18.5', '2026-07-18.4')).toBe(true)
+    expect(buildUpdateAction('2026-07-18.6', { playbackActive: false, editing: false, storageHealthy: true })).toBe('reload')
+    expect(buildUpdateAction('2026-07-18.6', { playbackActive: true, editing: false, storageHealthy: true })).toBe('notify')
+    expect(buildUpdateAction('2026-07-18.6', { playbackActive: false, editing: true, storageHealthy: true })).toBe('notify')
+    expect(buildUpdateAction('2026-07-18.6', { playbackActive: false, editing: false, storageHealthy: false })).toBe('notify')
   })
 
   it('exports the required FamiTracker 0.4.6 text sections', () => {
