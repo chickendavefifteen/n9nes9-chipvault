@@ -1,15 +1,16 @@
 {
-    "build":  "2026-07-18.7",
+    "build":  "2026-07-18.8",
     "previousIndexAssets":  [
-                                "assets/index-rYdTXOFp.js",
-                                "assets/index-uoXB_hZx.css"
+                                "assets/index-CVquuzxp.css",
+                                "assets/index-CX9UG2Uy.js"
                             ],
     "currentIndexAssets":  [
-                               "assets/index-CVquuzxp.css",
-                               "assets/index-CX9UG2Uy.js"
+                               "assets/index-CcDOHTVR.js",
+                               "assets/index-CVquuzxp.css"
                            ],
     "aliasedEntrypoints":  [
                                "assets/index-CBgRcmEp.js",
+                               "assets/index-CcDOHTVR.js",
                                "assets/index-COejueBs.js",
                                "assets/index-CVquuzxp.css",
                                "assets/index-CX9UG2Uy.js",
@@ -25,6 +26,7 @@
                            ],
     "retainedAssets":  [
                            "assets/index-CBgRcmEp.js",
+                           "assets/index-CcDOHTVR.js",
                            "assets/index-COejueBs.js",
                            "assets/index-CVquuzxp.css",
                            "assets/index-CX9UG2Uy.js",
