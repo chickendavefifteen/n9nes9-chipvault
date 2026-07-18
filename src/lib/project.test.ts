@@ -4,24 +4,41 @@ import { resolve } from 'node:path'
 import { library, tutorials } from '../data/library'
 import { recoveredProjectForTrack } from '../data/recovered'
 import { createDraft, exportFamiTrackerText, importFamiTrackerText, parseProject, serializeProject } from './project'
+import { BUILD_ID, shouldReloadBuild } from './versioning'
 
 describe('Chipvault project interchange', () => {
-  it('has a complete, unique 17-recording archive and documents both tutorials', () => {
-    expect(library).toHaveLength(17)
+  it('has a complete, unique 17-recording archive, external bonus, and both tutorials', () => {
+    expect(library).toHaveLength(18)
     expect(tutorials).toHaveLength(2)
-    expect(new Set(library.map((track) => track.id)).size).toBe(17)
+    expect(new Set(library.map((track) => track.id)).size).toBe(18)
+    expect(library.filter((track) => track.audio)).toHaveLength(17)
     for (const track of library) {
-      expect(existsSync(resolve('public', track.audio))).toBe(true)
+      if (track.audio) expect(existsSync(resolve('public', track.audio))).toBe(true)
       expect(existsSync(resolve('public', track.poster))).toBe(true)
     }
+    const bonus = library.find((track) => track.kind === 'bonus')
+    expect(bonus?.externalVideoId).toBe('ez8m4PXksQs')
+    expect(bonus?.externalEnd).toBe(600)
+    expect(bonus?.audio).toBeUndefined()
   })
 
   it('round-trips the native project without losing cells', () => {
     const project = createDraft(library[0])
     project.cells.pulse1[0].note = 'C-4'
+    project.cells.pulse1[0].edited = true
     const restored = parseProject(serializeProject(project))
     expect(restored.cells.pulse1[0].note).toBe('C-4')
+    expect(restored.cells.pulse1[0].edited).toBe(true)
     expect(restored.sourceId).toBe(library[0].id)
+    expect(exportFamiTrackerText(restored)).not.toContain('EDIT')
+  })
+
+  it('reloads only when the no-cache manifest is newer', () => {
+    expect(BUILD_ID).toMatch(/^\d{4}-\d{2}-\d{2}\.\d+$/)
+    expect(shouldReloadBuild(BUILD_ID)).toBe(false)
+    expect(shouldReloadBuild('2026-07-18.2')).toBe(false)
+    expect(shouldReloadBuild('2026-07-18.4')).toBe(true)
+    expect(shouldReloadBuild('broken')).toBe(false)
   })
 
   it('exports the required FamiTracker 0.4.6 text sections', () => {

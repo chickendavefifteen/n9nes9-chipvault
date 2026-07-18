@@ -31,6 +31,12 @@ A static, offline-capable archive and modern browser tracker for the music uploa
 - R10: During recovered source playback, keep a fixed centre playhead while pattern rows move continuously past it at the source recording's row rate.
 - R11: Present View, Edit, and Export as the three obvious workspace actions; entering View or Edit must never trigger a download.
 - R12: Use a restrained animated neon-sunset background and compact layout without reducing tracker contrast, legibility, or interaction speed.
+- R13: Match the recorded FamiTracker grid at token level: bright white notes, cobalt instruments, violet volume/effect data, and a blue-violet active row.
+- R14: Mark every browser-authored cell edit clearly and persist that provenance in native Chipvault projects without leaking it into FamiTracker text exports.
+- R15: Track changes, View/Edit changes, and tracker/piano changes must stop incompatible playback first and leave transport, audio, animation, and selected-row state coherent.
+- R16: Pause playback when the document is hidden, resynchronise on return, and check a no-cache build manifest so stale tabs reload the current deployment.
+- R17: Make the neon sunset deliberately brighter while retaining tracker contrast and disabling decorative motion for reduced-motion users.
+- R18: Add an Epic Sax Guy bonus as an official externally embedded YouTube performance limited to a ten-minute session; do not copy it into the downloadable archive or misrepresent it as N9NES9 source material.
 
 ## Acceptance checks
 
@@ -45,6 +51,9 @@ A static, offline-capable archive and modern browser tracker for the music uploa
 - C9: The centre playhead remains at a stable viewport coordinate while its order/row label advances with the recording.
 - C10: Desktop and narrow-screen browser checks expose unique View, Edit, and Export controls without page-level horizontal overflow.
 - C11: `prefers-reduced-motion` disables decorative sunset/grid motion and smooth tracker scrolling.
+- C12: Browser tests prove note, instrument, volume, and effect tokens have distinct high-contrast colors and edited cells retain an explicit user-edit marker.
+- C13: Unit and browser tests prove track/mode switching stops orphaned playback, hidden-tab recovery leaves animation coherent, and the build manifest requests a reload only for a genuinely newer build.
+- C14: The bonus entry embeds the official Eurovision-hosted video for a ten-minute session and exposes no archive-audio download or project-export claim.
 
 ## Out of scope for this recovery pass
 

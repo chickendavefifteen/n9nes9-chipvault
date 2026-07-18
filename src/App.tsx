@@ -12,10 +12,11 @@ import {
   parseProject,
   serializeProject,
 } from './lib/project'
+import { BUILD_ID, fetchBuildManifest, shouldReloadBuild } from './lib/versioning'
 import type { ChannelId, LibraryTrack, TrackerProject } from './types'
 
 type ViewMode = 'tracker' | 'piano'
-type Filter = 'all' | 'original' | 'cover' | 'demo'
+type Filter = 'all' | 'original' | 'cover' | 'demo' | 'bonus'
 
 const engine = new ChipAudioEngine()
 const storageKey = (id: string) => `n9nes9-chipvault:${id}`
@@ -58,6 +59,7 @@ function App() {
   const [muted, setMuted] = useState<Set<ChannelId>>(new Set())
   const [message, setMessage] = useState('Ready')
   const [aboutOpen, setAboutOpen] = useState(false)
+  const [updateReady, setUpdateReady] = useState(false)
   const importRef = useRef<HTMLInputElement>(null)
   const audioRef = useRef<HTMLAudioElement>(null)
   const timerRef = useRef<number | null>(null)
@@ -68,6 +70,9 @@ function App() {
     return matchesFilter && haystack.includes(query.trim().toLowerCase())
   }), [filter, query])
   const selectedCell = project.cells[selectedChannel][selectedRow]
+  const editedCount = useMemo(() => channels.reduce((total, channel) => (
+    total + project.cells[channel.id].filter((cell) => cell.edited).length
+  ), 0), [project])
 
   const commit = useCallback((mutate: (draft: TrackerProject) => void) => {
     setProject((current) => {
@@ -80,13 +85,24 @@ function App() {
     })
   }, [])
 
-  const stop = useCallback(() => {
+  const stopChip = useCallback((nextMessage?: string) => {
     if (timerRef.current !== null) window.clearInterval(timerRef.current)
     timerRef.current = null
     engine.stop()
     setPlaying(false)
-    setMessage('Stopped')
+    if (nextMessage) setMessage(nextMessage)
   }, [])
+
+  const pauseReference = useCallback(() => {
+    audioRef.current?.pause()
+    setReferencePlaying(false)
+  }, [])
+
+  const stopEverything = useCallback((nextMessage?: string) => {
+    stopChip()
+    pauseReference()
+    if (nextMessage) setMessage(nextMessage)
+  }, [pauseReference, stopChip])
 
   const syncReference = useCallback(() => {
     const audio = audioRef.current
@@ -97,8 +113,8 @@ function App() {
   }, [project.sourceSync])
 
   const start = useCallback(() => {
-    if (playing) { stop(); return }
-    audioRef.current?.pause()
+    if (playing) { stopChip('Stopped'); return }
+    pauseReference()
     const rowDuration = 60 / project.tempo / 4
     let row = playhead
     const tick = () => {
@@ -109,26 +125,28 @@ function App() {
       row += 1
       if (row >= project.rows) {
         if (project.loop) row = 0
-        else stop()
+        else stopChip('Finished')
       }
     }
     tick()
     timerRef.current = window.setInterval(tick, rowDuration * 1000)
     setPlaying(true)
     setMessage('Playing chip preview')
-  }, [muted, playhead, playing, project, stop])
+  }, [muted, pauseReference, playhead, playing, project, stopChip])
 
   const selectTrack = (track: LibraryTrack) => {
-    stop()
-    audioRef.current?.pause()
+    if (track.id === selectedId) return
+    stopEverything()
     setSelectedId(track.id)
     setProject(loadProject(track))
     setUndoStack([])
     setRedoStack([])
     setPlayhead(0)
     setSelectedRow(0)
+    setSelectedChannel('pulse1')
+    setView('tracker')
+    setMuted(new Set())
     setEditing(false)
-    setReferencePlaying(false)
     window.history.replaceState(null, '', `#${track.slug}`)
     setMessage(`Loaded ${track.shortTitle}`)
   }
@@ -137,11 +155,52 @@ function App() {
     localStorage.setItem(storageKey(selectedId), serializeProject(project))
   }, [project, selectedId])
 
-  useEffect(() => () => stop(), [stop])
+  useEffect(() => () => stopEverything(), [stopEverything])
+
+  useEffect(() => {
+    let disposed = false
+    const checkForUpdate = async () => {
+      const manifest = await fetchBuildManifest(import.meta.env.BASE_URL)
+      if (!disposed && shouldReloadBuild(manifest?.build)) setUpdateReady(true)
+    }
+    const reconcileReferenceState = () => {
+      const audio = audioRef.current
+      const active = Boolean(audio && !audio.paused && !audio.ended)
+      setReferencePlaying((current) => current === active ? current : active)
+    }
+    const onVisibilityChange = () => {
+      if (document.hidden) {
+        stopEverything('Paused while this tab was inactive')
+      } else {
+        reconcileReferenceState()
+        syncReference()
+        void checkForUpdate()
+      }
+    }
+    const onPageShow = (event: PageTransitionEvent) => {
+      if (event.persisted) stopEverything('Restored safely from browser history')
+      void checkForUpdate()
+    }
+    document.addEventListener('visibilitychange', onVisibilityChange)
+    window.addEventListener('pageshow', onPageShow)
+    const updateInterval = window.setInterval(() => { if (!document.hidden) void checkForUpdate() }, 300_000)
+    const mediaInterval = window.setInterval(() => { if (!document.hidden) reconcileReferenceState() }, 1_000)
+    void checkForUpdate()
+    return () => {
+      disposed = true
+      document.removeEventListener('visibilitychange', onVisibilityChange)
+      window.removeEventListener('pageshow', onPageShow)
+      window.clearInterval(updateInterval)
+      window.clearInterval(mediaInterval)
+    }
+  }, [stopEverything, syncReference])
 
   const setNote = useCallback((channelId: ChannelId, row: number, note: string | null) => {
     if (!editing) return
-    commit((draft) => { draft.cells[channelId][row].note = note })
+    commit((draft) => {
+      draft.cells[channelId][row].note = note
+      draft.cells[channelId][row].edited = true
+    })
     setSelectedChannel(channelId)
     setSelectedRow(row)
   }, [commit, editing])
@@ -214,6 +273,10 @@ function App() {
   }
 
   function toggleTransport() {
+    if (selectedTrack.externalVideoId) {
+      setMessage('Use the official YouTube controls for the bonus session')
+      return
+    }
     if (!editing && audioRef.current) {
       if (audioRef.current.paused) {
         if (project.sourceSync && audioRef.current.currentTime < project.sourceSync.audioOffset) audioRef.current.currentTime = project.sourceSync.audioOffset
@@ -227,18 +290,22 @@ function App() {
   }
 
   const setEditMode = (next: boolean) => {
-    stop()
-    audioRef.current?.pause()
-    setReferencePlaying(false)
+    if (next === editing || selectedTrack.externalVideoId) return
+    stopEverything()
     setEditing(next)
     setMessage(next ? 'Editing a browser working copy' : 'Viewing recovered source')
   }
 
+  const setEditorView = (next: ViewMode) => {
+    if (next === view) return
+    stopEverything()
+    setView(next)
+    setMessage(next === 'tracker' ? 'Tracker grid ready' : 'Piano roll ready')
+  }
+
   const returnToStart = () => {
-    stop()
-    audioRef.current?.pause()
+    stopEverything()
     if (audioRef.current) audioRef.current.currentTime = project.sourceSync?.audioOffset ?? 0
-    setReferencePlaying(false)
     setPlayhead(0)
     setMessage('Returned to first row')
   }
@@ -249,10 +316,16 @@ function App() {
   }
 
   const reset = () => {
-    if (!window.confirm(`Clear the local recovery draft for “${selectedTrack.shortTitle}”?`)) return
+    if (!window.confirm(`Reset local edits for “${selectedTrack.shortTitle}”?`)) return
     setUndoStack((stack) => [...stack, cloneProject(project)])
-    setProject(createDraft(selectedTrack))
-    setMessage('Started a fresh recovery draft')
+    setProject(recoveredProjectForTrack(selectedTrack) ?? createDraft(selectedTrack))
+    setMessage('Restored the clean recovery baseline')
+  }
+
+  const reloadCurrentBuild = () => {
+    const url = new URL(window.location.href)
+    url.searchParams.set('build', Date.now().toString())
+    window.location.replace(url)
   }
 
   return (
@@ -262,7 +335,7 @@ function App() {
           <span className="brand-mark" aria-hidden="true"><i /><i /><i /><i /></span>
           <span><b>N9NES9</b><em>CHIPVAULT</em></span>
         </a>
-        <div className="topbar-status"><span className="live-dot" /> Online tracker · 17 recordings</div>
+        <div className="topbar-status"><span className="live-dot" /> Online tracker · 17 recordings + bonus</div>
         <button className="ghost-button" onClick={() => setAboutOpen(true)}>About the recovery</button>
       </header>
 
@@ -277,13 +350,13 @@ function App() {
           <input value={query} onChange={(event) => setQuery(event.target.value)} placeholder="Find a track" aria-label="Find a track" />
         </label>
         <div className="filter-row" aria-label="Filter tracks">
-          {(['all', 'original', 'cover', 'demo'] as Filter[]).map((item) => (
+          {(['all', 'original', 'cover', 'demo', 'bonus'] as Filter[]).map((item) => (
             <button key={item} className={filter === item ? 'active' : ''} onClick={() => setFilter(item)}>{item}</button>
           ))}
         </div>
         <div className="track-list">
           {filtered.map((track, index) => (
-            <button key={track.id} className={`track-item ${selectedId === track.id ? 'selected' : ''}`} onClick={() => selectTrack(track)}>
+            <button key={track.id} className={`track-item ${track.kind === 'bonus' ? 'bonus-track' : ''} ${selectedId === track.id ? 'selected' : ''}`} onClick={() => selectTrack(track)}>
               <span className="track-index">{String(index + 1).padStart(2, '0')}</span>
               <span className="track-copy"><b>{track.shortTitle}</b><small>{track.kind} · {Math.floor(track.duration / 60)}:{String(track.duration % 60).padStart(2, '0')}</small></span>
               <span className="track-arrow" aria-hidden="true">↗</span>
@@ -293,6 +366,7 @@ function App() {
       </aside>
 
       <main className="studio" id="top">
+        {updateReady && <button className="update-toast" onClick={reloadCurrentBuild}><strong>Fresh build ready</strong><span>Reload the tracker cleanly →</span></button>}
         <section className="hero-card">
           <img src={asset(selectedTrack.poster)} alt="" />
           <div className="hero-copy">
@@ -300,18 +374,22 @@ function App() {
             <h2>{selectedTrack.shortTitle}</h2>
             <p>{selectedTrack.description}</p>
             {selectedTrack.credit && <p className="credit">{selectedTrack.credit}</p>}
-            <div className="workspace-mode" aria-label="Workspace mode">
+            {!selectedTrack.externalVideoId && <div className="workspace-mode" aria-label="Workspace mode">
               <button className={!editing ? 'active' : ''} onClick={() => setEditMode(false)}><span>View</span><small>source animation</small></button>
               <button className={editing ? 'active' : ''} onClick={() => setEditMode(true)}><span>Edit</span><small>browser workspace</small></button>
-              <details className="export-menu mode-export"><summary>Export</summary><div><button onClick={exportNative}>Chipvault JSON</button><button onClick={exportFami}>FamiTracker TXT</button><a href={asset(selectedTrack.audio)} download={`${selectedTrack.slug}.m4a`}>Source audio M4A</a><button onClick={() => importRef.current?.click()}>Import project</button>{editing && <button className="danger-action" onClick={reset}>Fresh draft</button>}</div></details>
-            </div>
-            <div className="source-player">
-              <audio ref={audioRef} key={selectedTrack.id} src={asset(selectedTrack.audio)} controls preload="metadata" onPlay={() => { stop(); setReferencePlaying(true); setMessage('Playing original recording') }} onPause={() => setReferencePlaying(false)} onTimeUpdate={syncReference} />
+              <details className="export-menu mode-export"><summary>Export</summary><div><button onClick={exportNative}>Chipvault JSON</button><button onClick={exportFami}>FamiTracker TXT</button>{selectedTrack.audio && <a href={asset(selectedTrack.audio)} download={`${selectedTrack.slug}.m4a`}>Source audio M4A</a>}<button onClick={() => importRef.current?.click()}>Import project</button>{editing && <button className="danger-action" onClick={reset}>Reset edits</button>}</div></details>
+            </div>}
+            {selectedTrack.audio && <div className="source-player">
+              <audio ref={audioRef} key={selectedTrack.id} src={asset(selectedTrack.audio)} controls preload="metadata" onPlay={() => { stopChip(); setReferencePlaying(true); setMessage('Playing original recording') }} onPause={() => setReferencePlaying(false)} onEnded={() => { setReferencePlaying(false); setMessage('Recording finished') }} onTimeUpdate={syncReference} />
               <a className="youtube-link" href={selectedTrack.sourceUrl} target="_blank" rel="noreferrer">Original upload ↗</a>
-            </div>
+            </div>}
+            {selectedTrack.externalVideoId && <div className="bonus-source"><span>Official external stream</span><a href={selectedTrack.sourceUrl} target="_blank" rel="noreferrer">Open on YouTube ↗</a></div>}
           </div>
         </section>
 
+        {selectedTrack.externalVideoId ? (
+          <BonusPlayer track={selectedTrack} />
+        ) : <>
         <section className={`recovery-banner ${project.recoveryStatus === 'pattern-recovered' ? 'recovered' : ''}`}>
           <span className="warning-icon" aria-hidden="true">!</span>
           {project.recoveryStatus === 'pattern-recovered' ? (
@@ -335,13 +413,13 @@ function App() {
             <button onClick={undo} disabled={!undoStack.length} title="Undo">↶</button>
             <button onClick={redo} disabled={!redoStack.length} title="Redo">↷</button>
             {editing && <button className="save-button" onClick={saveWorkspace}>Save</button>}
-            <span className="save-state"><i /> {editing ? 'browser autosave' : 'source view'}</span>
+            <span className={`save-state ${editedCount ? 'has-edits' : ''}`}><i /> {editing ? `${editedCount} user-edited cell${editedCount === 1 ? '' : 's'}` : 'source view'}</span>
           </div>
 
           <div className="editor-tabs">
             <div role="tablist" aria-label="Editor view">
-              <button role="tab" aria-selected={view === 'tracker'} className={view === 'tracker' ? 'active' : ''} onClick={() => setView('tracker')}>Tracker</button>
-              <button role="tab" aria-selected={view === 'piano'} className={view === 'piano' ? 'active' : ''} onClick={() => setView('piano')}>Piano roll</button>
+              <button role="tab" aria-selected={view === 'tracker'} className={view === 'tracker' ? 'active' : ''} onClick={() => setEditorView('tracker')}>Tracker</button>
+              <button role="tab" aria-selected={view === 'piano'} className={view === 'piano' ? 'active' : ''} onClick={() => setEditorView('piano')}>Piano roll</button>
             </div>
             <div className="octave-control"><button onClick={() => setOctave(Math.max(1, octave - 1))}>−</button><span>Oct {octave}</span><button onClick={() => setOctave(Math.min(7, octave + 1))}>+</button></div>
           </div>
@@ -361,14 +439,14 @@ function App() {
               <button className="clear-note" onClick={() => setNote(selectedChannel, selectedRow, null)}>clear</button>
             </div>
             <div className="cell-inspector">
-              <label>Volume <input type="range" min="0" max="15" value={selectedCell.volume ?? 15} onChange={(event) => commit((draft) => { draft.cells[selectedChannel][selectedRow].volume = Number(event.target.value) })} /><output>{(selectedCell.volume ?? 15).toString(16).toUpperCase()}</output></label>
-              <label>Effect <input aria-label="Effect command" value={selectedCell.effect} maxLength={3} placeholder="0xy" onChange={(event) => { const value = event.target.value.toUpperCase().replace(/[^0-9A-FP-Z]/g, '').slice(0, 3); commit((draft) => { draft.cells[selectedChannel][selectedRow].effect = value }) }} /></label>
+              <label>Volume <input type="range" min="0" max="15" value={selectedCell.volume ?? 15} onChange={(event) => commit((draft) => { const cell = draft.cells[selectedChannel][selectedRow]; cell.volume = Number(event.target.value); cell.edited = true })} /><output>{(selectedCell.volume ?? 15).toString(16).toUpperCase()}</output></label>
+              <label>Effect <input aria-label="Effect command" value={selectedCell.effect} maxLength={3} placeholder="0xy" onChange={(event) => { const value = event.target.value.toUpperCase().replace(/[^0-9A-FP-Z]/g, '').slice(0, 3); commit((draft) => { const cell = draft.cells[selectedChannel][selectedRow]; cell.effect = value; cell.edited = true }) }} /></label>
             </div>
             <p><kbd>A–K</kbd> enter notes · <kbd>Z/X</kbd> octave · <kbd>Del</kbd> clear · <kbd>Space</kbd> play</p></> : <div className="view-mode-copy"><strong>Fixed playhead · moving pattern</strong><span>Press Play to follow the recovered grid in time with the original recording.</span></div>}
           </div>
-        </section>
+        </section></>}
         <input ref={importRef} type="file" accept=".json,.txt" hidden onChange={(event) => { const file = event.target.files?.[0]; if (file) void onImport(file); event.target.value = '' }} />
-        <footer><span>{message}</span><span>Built for preservation · no analytics · data stays local</span></footer>
+        <footer><span>{message}</span><span>Build {BUILD_ID} · no analytics · data stays local</span></footer>
       </main>
 
       {aboutOpen && <AboutDialog onClose={() => setAboutOpen(false)} />}
@@ -446,7 +524,14 @@ function TrackerGrid({ project, playhead, referenceAudioRef, referencePlaying, c
             {channels.map((channel) => {
               const cell = project.cells[channel.id][row]
               const selected = channel.id === selectedChannel && row === selectedRow
-              return <td key={channel.id}><button className={selected ? 'selected-cell' : ''} onClick={() => onSelect(channel.id, row)} onDoubleClick={() => { if (editing) onClear(channel.id, row) }} onContextMenu={(event) => { if (editing) { event.preventDefault(); onClear(channel.id, row) } }}><b>{cell.note ?? '···'}</b><span>{cell.note && cell.instrument !== null ? cell.instrument.toString(16).padStart(2, '0').toUpperCase() : '··'} {cell.note && cell.volume !== null ? cell.volume.toString(16).toUpperCase() : '·'} {cell.effect || '···'}</span></button></td>
+              const instrument = cell.note && cell.instrument !== null ? cell.instrument.toString(16).padStart(2, '0').toUpperCase() : '··'
+              const volume = cell.note && cell.volume !== null ? cell.volume.toString(16).toUpperCase() : '·'
+              const effect = cell.effect || '···'
+              return <td key={channel.id} style={{ '--channel': channel.color } as React.CSSProperties}><button aria-label={`${channel.name}, row ${row}${cell.edited ? ', user edited' : ''}`} className={`${selected ? 'selected-cell' : ''} ${cell.edited ? 'user-edited' : ''}`} onClick={() => onSelect(channel.id, row)} onDoubleClick={() => { if (editing) onClear(channel.id, row) }} onContextMenu={(event) => { if (editing) { event.preventDefault(); onClear(channel.id, row) } }}>
+                <b className={`note-token ${cell.note ? '' : 'empty-token'}`}>{cell.note ?? '···'}</b>
+                <span className="cell-fields"><i className={`instrument-token ${instrument === '··' ? 'empty-token' : ''}`}>{instrument}</i><i className={`volume-token ${volume === '·' ? 'empty-token' : ''}`}>{volume}</i><i className={`effect-token ${effect === '···' ? 'empty-token' : ''}`}>{effect}</i></span>
+                {cell.edited && <em className="edit-marker">EDIT</em>}
+              </button></td>
             })}
           </tr>
         ))}<tr className="tracker-spacer-row" aria-hidden="true"><td colSpan={channels.length + 1} /></tr></tbody>
@@ -465,15 +550,33 @@ function PianoRoll({ project, channelId, selectedRow, editing, onChannel, onSetN
 }) {
   const pitches = Array.from({ length: 36 }, (_, index) => midiToNote(83 - index))
   const notesByRow = new Map(project.cells[channelId].map((cell, row) => [row, cell.note]))
+  const editedRows = new Set(project.cells[channelId].flatMap((cell, row) => cell.edited ? [row] : []))
   return (
     <div className="piano-editor">
       <div className="piano-toolbar"><label>Editing<select value={channelId} onChange={(event) => onChannel(event.target.value as ChannelId)}>{channels.map((channel) => <option value={channel.id} key={channel.id}>{channel.name}</option>)}</select></label><span>Click to draw · click again to erase</span></div>
       <div className="piano-scroll">
         <div className="piano-grid" style={{ '--rows': project.rows } as React.CSSProperties}>
-          {pitches.map((note) => <div className="piano-line" key={note}><span className={note.includes('#') ? 'black-key' : ''}>{note}</span><div className="piano-cells">{Array.from({ length: project.rows }, (_, row) => <button key={row} disabled={!editing} aria-label={`${note} at row ${row}`} className={`${notesByRow.get(row) === note ? 'placed' : ''} ${selectedRow === row ? 'selected-column' : ''}`} onClick={() => onSetNote(channelId, row, notesByRow.get(row) === note ? null : note)} />)}</div></div>)}
+          {pitches.map((note) => <div className="piano-line" key={note}><span className={note.includes('#') ? 'black-key' : ''}>{note}</span><div className="piano-cells">{Array.from({ length: project.rows }, (_, row) => <button key={row} disabled={!editing} aria-label={`${note} at row ${row}${editedRows.has(row) ? ', user edited' : ''}`} className={`${notesByRow.get(row) === note ? 'placed' : ''} ${selectedRow === row ? 'selected-column' : ''} ${editedRows.has(row) ? 'user-edited' : ''}`} onClick={() => onSetNote(channelId, row, notesByRow.get(row) === note ? null : note)} />)}</div></div>)}
         </div>
       </div>
     </div>
+  )
+}
+
+function BonusPlayer({ track }: { track: LibraryTrack }) {
+  const videoId = track.externalVideoId as string
+  const end = track.externalEnd ?? 600
+  const embedUrl = `https://www.youtube-nocookie.com/embed/${videoId}?end=${end}&rel=0&playsinline=1`
+  return (
+    <section className="bonus-player" aria-labelledby="bonus-player-title">
+      <div className="bonus-copy">
+        <p className="eyebrow">Bonus transmission / 10:00</p>
+        <h3 id="bonus-player-title">Ten minutes of maximum sax.</h3>
+        <p>This uses the official Eurovision player and stops at the ten-minute mark. It is an external bonus stream, so it is deliberately not included in Chipvault downloads or FamiTracker exports.</p>
+        <div className="bonus-meter" aria-hidden="true">{Array.from({ length: 24 }, (_, index) => <i key={index} style={{ '--delay': `${index * -0.07}s` } as React.CSSProperties} />)}</div>
+      </div>
+      <div className="bonus-frame"><iframe src={embedUrl} title="Official Epic Sax Guy ten-minute bonus session" allow="accelerometer; autoplay; encrypted-media; gyroscope; picture-in-picture" allowFullScreen /></div>
+    </section>
   )
 }
 

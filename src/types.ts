@@ -1,4 +1,4 @@
-export type TrackKind = 'original' | 'cover' | 'demo'
+export type TrackKind = 'original' | 'cover' | 'demo' | 'bonus'
 export type RecoveryStatus = 'source-missing' | 'pattern-recovered' | 'original-module'
 
 export interface LibraryTrack {
@@ -9,13 +9,15 @@ export interface LibraryTrack {
   kind: TrackKind
   duration: number
   uploaded: string
-  expansion: '2A03' | 'VRC6'
+  expansion: '2A03' | 'VRC6' | 'External'
   description: string
   credit?: string
   sourceUrl: string
-  audio: string
+  audio?: string
   poster: string
   recoveryStatus: RecoveryStatus
+  externalVideoId?: string
+  externalEnd?: number
 }
 
 export type ChannelId =
@@ -41,6 +43,7 @@ export interface TrackerCell {
   instrument: number | null
   volume: number | null
   effect: string
+  edited?: boolean
 }
 
 export interface SourceSync {
