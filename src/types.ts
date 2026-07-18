@@ -1,5 +1,5 @@
 export type TrackKind = 'original' | 'cover' | 'demo' | 'bonus'
-export type RecoveryStatus = 'source-missing' | 'pattern-recovered' | 'original-module'
+export type RecoveryStatus = 'source-missing' | 'pattern-recovered' | 'audio-transcribed' | 'arranged-cover' | 'original-module'
 
 export interface LibraryTrack {
   id: string
@@ -16,8 +16,6 @@ export interface LibraryTrack {
   audio?: string
   poster: string
   recoveryStatus: RecoveryStatus
-  externalVideoId?: string
-  externalEnd?: number
 }
 
 export type ChannelId =

@@ -36,16 +36,19 @@ A static, offline-capable archive and modern browser tracker for the music uploa
 - R15: Track changes, View/Edit changes, and tracker/piano changes must stop incompatible playback first and leave transport, audio, animation, and selected-row state coherent.
 - R16: Pause playback when the document is hidden, resynchronise on return, and check a no-cache build manifest so stale tabs reload the current deployment.
 - R17: Make the neon sunset deliberately brighter while retaining tracker contrast and disabling decorative motion for reduced-motion users.
-- R18: Add an Epic Sax Guy bonus as an official externally embedded YouTube performance limited to a ten-minute session; do not copy it into the downloadable archive or misrepresent it as N9NES9 source material.
+- R18: Add an editable browser-synthesized Epic Sax Guy chiptune arrangement, clearly credited as a cover and limited to a ten-minute playback session; do not copy the original recording into the archive or misrepresent the arrangement as N9NES9 source material.
 - R19: A Pages deployment must retain every hashed JS/CSS asset referenced by the previously deployed HTML; cached HTML must remain bootable for longer than GitHub Pages' ten-minute HTML cache window.
 - R20: Never force-replace the Pages branch with an asset-pruning orphan commit. Deploy by overlaying the tested build onto the existing branch, verify both previous and current HTML asset references, then push normally.
 - R21: Denied or unavailable browser storage must degrade to an in-memory workspace with a visible warning rather than preventing the React application from starting.
 - R22: Support current Chrome, Edge, Firefox, and Safari with an ES2019 production target, avoid unsupported runtime-only conveniences where a simple compatible equivalent exists, and render a useful static/error fallback instead of a blank page.
 - R23: Source playback and tracker animation must share one explicit transport lifecycle. Starting, playing, buffering, pausing, ending, looping, media failure, mode changes, track changes, and tab restoration must never leave the button, audio element, message, or animation disagreeing.
 - R24: If source audio is rejected or stops advancing, automatically fall back to the chip engine after a bounded grace period; unlock that engine during the original user gesture so the fallback can still produce sound.
-- R25: View-mode animation must follow source time for every local recording. Recovered projects use their measured source timing; unrecovered drafts use their declared tracker tempo and remain clearly labelled as drafts.
+- R25: View-mode animation must follow source time for every local recording. Frame-recovered and audio-derived projects use their measured source timing and remain clearly confidence-labelled.
 - R26: Only one current Chipvault tab may play at once. Current tabs coordinate with BroadcastChannel plus a storage-event fallback, and a newer idle build reloads itself on focus, visibility return, page restore, online recovery, or the bounded manifest poll.
 - R27: Every historical hashed entrypoint observed in deployed or still-open tabs must remain resolvable. Cache-safe deployment aliases historical JS/CSS names to the newly tested bundle so stale HTML cannot revive obsolete playback code.
+- R28: Because GitHub Pages forces a ten-minute document cache, every top-level navigation must immediately replace itself with a unique `fresh` query request, then remove only that token from the visible URL without another navigation. Reloading, revisiting, or opening an old bookmark must therefore obtain a fresh HTML document.
+- R29: Selecting any of the 18 library entries must load a populated editable pattern with visible note keys. The 16 recordings without frame recovery use reproducible dominant-pitch/onset analysis of the preserved mix and must not be described as exact original modules.
+- R30: Switching tracks must upgrade any older autosaved blank baseline when the shipped content revision is newer, without overwriting newer user edits.
 
 ## Acceptance checks
 
@@ -62,17 +65,20 @@ A static, offline-capable archive and modern browser tracker for the music uploa
 - C11: `prefers-reduced-motion` disables decorative sunset/grid motion and smooth tracker scrolling.
 - C12: Browser tests prove note, instrument, volume, and effect tokens have distinct high-contrast colors and edited cells retain an explicit user-edit marker.
 - C13: Unit and browser tests prove track/mode switching stops orphaned playback, hidden-tab recovery leaves animation coherent, and the build manifest requests a reload only for a genuinely newer build.
-- C14: The bonus entry embeds the official Eurovision-hosted video for a ten-minute session and exposes no archive-audio download or project-export claim.
+- C14: The bonus entry opens a populated VRC6 tracker arrangement, plays through the browser chip engine, can be edited/exported, credits the source performance, and stops after a maximum ten-minute session.
 - C15: A stale copy of the previous deployed `index.html` can request each of its hashed assets from the new Pages deployment and receive HTTP 200.
 - C16: The deploy script fails before pushing if an asset referenced by either the previous or current HTML is absent from the candidate Pages tree.
 - C17: Unit tests prove storage read/write failures are contained, project cloning works without `structuredClone`, and stale/current HTML asset references are extracted correctly.
-- C18: Production build, cold-root browser boot, source playback, fixed-playhead motion, editing, track/mode switching, and the external bonus pass with no uncaught browser errors.
+- C18: Production build, cold-root browser boot, source playback, fixed-playhead motion, editing, track/mode switching, and the synthesized bonus pass with no uncaught browser errors.
 - C19: Unit tests prove source position for recovered and draft projects, bounded stall detection, visible-loop restart, cross-tab signal validation, and safe reload-vs-notify update decisions.
 - C20: Browser tests prove six consecutive pause/resume cycles keep media, transport label, moving rows, and fixed playhead coherent.
 - C21: Browser tests force source playback to its end and prove Loop restarts both sound and animation instead of leaving an ended or stale-playing state.
 - C22: Browser tests prove a stalled/rejected source enters audible chip fallback and that switching mode, track, or active tab leaves no orphaned playback.
 - C23: Reload tests cover every open historical tab and at least ten cold/current reloads; each must boot the current build with no startup or console error.
 - C24: Deployment proof returns HTTP 200 for every current, previous, and historical entrypoint, and byte hashes prove all historical aliases contain the current tested JS/CSS bundle.
+- C25: Unit tests prove every library entry returns a populated baseline, every audio-derived draft has melody/bass/rhythm data, and the bonus has recognizable lead, harmony, bass, and drums.
+- C26: Browser tests click through all 18 entries and prove the heading, recovery label, tracker table, and non-empty notes update every time.
+- C27: Repeated root reloads prove the navigation bootstrap requests a new `fresh` URL on every load, cleans the visible URL, retains the selected hash, and boots the current build with no redirect loop.
 
 ## Out of scope for this recovery pass
 

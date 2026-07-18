@@ -1,5 +1,20 @@
 import type { ChannelId, LibraryTrack, TrackerCell, TrackerProject } from '../types'
 import { createDraft } from '../lib/project'
+import transcriptionData from './audio-transcriptions.json'
+
+interface AudioTranscription {
+  tempo: number
+  rows: number
+  audioOffset: number
+  secondsPerRow: number
+  confidence: number
+  melody: Array<string | null>
+  harmony: Array<string | null>
+  bass: Array<string | null>
+  noise: Array<string | null>
+}
+
+const transcriptions = transcriptionData as Record<string, AudioTranscription>
 
 const blank = (): TrackerCell => ({ note: null, instrument: null, volume: null, effect: '' })
 
@@ -67,7 +82,7 @@ function gameCompleteLoop(track: LibraryTrack): TrackerProject {
   project.cells = Object.fromEntries(Object.keys(project.cells).map((id) => [id, Array.from({ length: 128 }, blank)])) as TrackerProject['cells']
   project.patternLength = 64
   project.recoveryStatus = 'pattern-recovered'
-  project.contentRevision = 1
+  project.contentRevision = 2
   project.sourceSync = {
     audioOffset: 1.839,
     secondsPerRow: 0.1,
@@ -82,6 +97,72 @@ function gameCompleteLoop(track: LibraryTrack): TrackerProject {
   return project
 }
 
+function audioTranscription(track: LibraryTrack, data: AudioTranscription): TrackerProject {
+  const project = createDraft(track, data.rows)
+  project.tempo = data.tempo
+  project.patternLength = 64
+  project.recoveryStatus = 'audio-transcribed'
+  project.contentRevision = 2
+  project.sourceSync = {
+    audioOffset: data.audioOffset,
+    secondsPerRow: data.secondsPerRow,
+    loopRows: data.rows,
+    confidence: data.confidence,
+    evidence: [
+      'Dominant-pitch and onset analysis of the preserved audio mix',
+      'Quantized to an editable 128-row tracker draft',
+      'Original channel assignments and instrument envelopes remain unknown',
+    ],
+  }
+
+  const leadChannel: ChannelId = track.expansion === 'VRC6' ? 'vrc6Pulse1' : 'pulse1'
+  const harmonyChannel: ChannelId = track.expansion === 'VRC6' ? 'vrc6Pulse2' : 'pulse2'
+  const bassChannel: ChannelId = track.expansion === 'VRC6' ? 'vrc6Saw' : 'triangle'
+  for (let row = 0; row < data.rows; row += 1) {
+    if (data.melody[row]) put(project, leadChannel, row, data.melody[row], 0, 13)
+    if (data.harmony[row]) put(project, harmonyChannel, row, data.harmony[row], 0, 8)
+    if (data.bass[row]) put(project, bassChannel, row, data.bass[row], 0, 10)
+    if (data.noise[row]) put(project, 'noise', row, data.noise[row], 3, row % 8 === 0 ? 12 : 7)
+  }
+  return project
+}
+
+function epicSaxArrangement(track: LibraryTrack): TrackerProject {
+  const project = createDraft(track, 64)
+  project.tempo = 132
+  project.patternLength = 64
+  project.recoveryStatus = 'arranged-cover'
+  project.contentRevision = 1
+
+  const melody: Array<[number, string, number]> = [
+    [0, 'A-4', 4], [4, 'A-4', 2], [6, 'A-4', 2], [8, 'A-4', 2], [10, 'A-4', 3], [14, 'G-4', 2], [16, 'A-4', 4],
+    [22, 'A-4', 2], [24, 'A-4', 2], [26, 'A-4', 2], [28, 'G-4', 2], [30, 'A-4', 4],
+    [36, 'C-5', 2], [38, 'A-4', 2], [40, 'G-4', 2], [42, 'F-4', 4],
+    [48, 'D-4', 2], [50, 'D-4', 2], [52, 'E-4', 2], [54, 'F-4', 4], [60, 'D-4', 4],
+  ]
+  melody.forEach(([start, note, length]) => {
+    for (let row = start; row < Math.min(64, start + length); row += 1) {
+      put(project, 'vrc6Pulse1', row, note, 0, Math.max(7, 15 - (row - start) * 2), row === start && start % 16 === 0 ? 'V02' : '')
+      if (row > start) put(project, 'pulse1', row, note, 0, 5)
+    }
+  })
+
+  const chords = [
+    ['A-3', 'C-4', 'E-4'], ['F-3', 'A-3', 'C-4'], ['G-3', 'B-3', 'D-4'], ['E-3', 'G-3', 'B-3'],
+  ]
+  for (let row = 0; row < 64; row += 2) {
+    const chord = chords[Math.floor(row / 16)]
+    put(project, 'vrc6Pulse2', row, chord[(row / 2) % chord.length], 0, 7)
+    if (row % 4 === 0) put(project, 'vrc6Saw', row, chord[0].replace('3', '2'), 0, 10)
+    if (row % 8 === 0) put(project, 'noise', row, 'C-#', 3, 12)
+    else if (row % 4 === 0) put(project, 'noise', row, '6-#', 3, 8)
+  }
+  return project
+}
+
 export function recoveredProjectForTrack(track: LibraryTrack): TrackerProject | null {
-  return track.id === 'TejsLqPt0-k' ? gameCompleteLoop(track) : null
+  if (track.id === 'TejsLqPt0-k') return gameCompleteLoop(track)
+  if (track.kind === 'bonus') return epicSaxArrangement(track)
+  const data = transcriptions[track.id]
+  return data ? audioTranscription(track, data) : null
 }

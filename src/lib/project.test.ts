@@ -1,13 +1,13 @@
 import { describe, expect, it } from 'vitest'
 import { existsSync } from 'node:fs'
 import { resolve } from 'node:path'
-import { library, tutorials } from '../data/library'
+import { channels, library, tutorials } from '../data/library'
 import { recoveredProjectForTrack } from '../data/recovered'
-import { createDraft, exportFamiTrackerText, importFamiTrackerText, parseProject, serializeProject } from './project'
+import { createDraft, exportFamiTrackerText, importFamiTrackerText, parseProject, preferShippedBaseline, serializeProject } from './project'
 import { buildUpdateAction, BUILD_ID, isNewerBuild, shouldReloadBuild } from './versioning'
 
 describe('Chipvault project interchange', () => {
-  it('has a complete, unique 17-recording archive, external bonus, and both tutorials', () => {
+  it('has a complete, unique 17-recording archive, editable bonus, and both tutorials', () => {
     expect(library).toHaveLength(18)
     expect(tutorials).toHaveLength(2)
     expect(new Set(library.map((track) => track.id)).size).toBe(18)
@@ -17,9 +17,27 @@ describe('Chipvault project interchange', () => {
       expect(existsSync(resolve('public', track.poster))).toBe(true)
     }
     const bonus = library.find((track) => track.kind === 'bonus')
-    expect(bonus?.externalVideoId).toBe('ez8m4PXksQs')
-    expect(bonus?.externalEnd).toBe(600)
+    expect(bonus?.expansion).toBe('VRC6')
+    expect(bonus?.duration).toBe(600)
     expect(bonus?.audio).toBeUndefined()
+  })
+
+  it('ships a populated editable baseline for every library entry', () => {
+    for (const track of library) {
+      const project = recoveredProjectForTrack(track)
+      expect(project, track.shortTitle).not.toBeNull()
+      const noteCount = channels.reduce((total, channel) => (
+        total + project!.cells[channel.id].filter((cell) => cell.note).length
+      ), 0)
+      expect(noteCount, track.shortTitle).toBeGreaterThan(20)
+    }
+    const bonus = recoveredProjectForTrack(library.find((track) => track.kind === 'bonus')!)!
+    expect(bonus.recoveryStatus).toBe('arranged-cover')
+    expect(bonus.tempo).toBe(132)
+    expect(bonus.cells.vrc6Pulse1.some((cell) => cell.note === 'A-4')).toBe(true)
+    expect(bonus.cells.vrc6Pulse2.filter((cell) => cell.note).length).toBeGreaterThan(20)
+    expect(bonus.cells.vrc6Saw.filter((cell) => cell.note).length).toBeGreaterThan(10)
+    expect(bonus.cells.noise.filter((cell) => cell.note).length).toBeGreaterThan(10)
   })
 
   it('round-trips the native project without losing cells', () => {
@@ -33,17 +51,32 @@ describe('Chipvault project interchange', () => {
     expect(exportFamiTrackerText(restored)).not.toContain('EDIT')
   })
 
+  it('upgrades saved blank baselines without overwriting newer user projects', () => {
+    const track = library[0]
+    const blankSaved = createDraft(track)
+    const shipped = recoveredProjectForTrack(track)!
+    expect(blankSaved.contentRevision).toBe(0)
+    expect(shipped.contentRevision).toBeGreaterThan(blankSaved.contentRevision)
+    expect(preferShippedBaseline(blankSaved, shipped)).toBe(shipped)
+
+    const newerUserProject = createDraft(track)
+    newerUserProject.contentRevision = shipped.contentRevision + 1
+    newerUserProject.cells.pulse1[0].note = 'C-5'
+    newerUserProject.cells.pulse1[0].edited = true
+    expect(preferShippedBaseline(newerUserProject, shipped)).toBe(newerUserProject)
+  })
+
   it('reloads only when the no-cache manifest is newer', () => {
     expect(BUILD_ID).toMatch(/^\d{4}-\d{2}-\d{2}\.\d+$/)
     expect(shouldReloadBuild(BUILD_ID)).toBe(false)
-    expect(shouldReloadBuild('2026-07-18.4')).toBe(false)
-    expect(shouldReloadBuild('2026-07-18.6')).toBe(true)
+    expect(shouldReloadBuild('2026-07-18.5')).toBe(false)
+    expect(shouldReloadBuild('2026-07-18.7')).toBe(true)
     expect(shouldReloadBuild('broken')).toBe(false)
-    expect(isNewerBuild('2026-07-18.5', '2026-07-18.4')).toBe(true)
-    expect(buildUpdateAction('2026-07-18.6', { playbackActive: false, editing: false, storageHealthy: true })).toBe('reload')
-    expect(buildUpdateAction('2026-07-18.6', { playbackActive: true, editing: false, storageHealthy: true })).toBe('notify')
-    expect(buildUpdateAction('2026-07-18.6', { playbackActive: false, editing: true, storageHealthy: true })).toBe('notify')
-    expect(buildUpdateAction('2026-07-18.6', { playbackActive: false, editing: false, storageHealthy: false })).toBe('notify')
+    expect(isNewerBuild('2026-07-18.6', '2026-07-18.5')).toBe(true)
+    expect(buildUpdateAction('2026-07-18.7', { playbackActive: false, editing: false, storageHealthy: true })).toBe('reload')
+    expect(buildUpdateAction('2026-07-18.7', { playbackActive: true, editing: false, storageHealthy: true })).toBe('notify')
+    expect(buildUpdateAction('2026-07-18.7', { playbackActive: false, editing: true, storageHealthy: true })).toBe('notify')
+    expect(buildUpdateAction('2026-07-18.7', { playbackActive: false, editing: false, storageHealthy: false })).toBe('notify')
   })
 
   it('exports the required FamiTracker 0.4.6 text sections', () => {

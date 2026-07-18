@@ -33,6 +33,10 @@ export function cloneProject(project: TrackerProject): TrackerProject {
   return JSON.parse(JSON.stringify(project)) as TrackerProject
 }
 
+export function preferShippedBaseline(saved: TrackerProject, shipped: TrackerProject | null): TrackerProject {
+  return shipped && saved.contentRevision < shipped.contentRevision ? shipped : saved
+}
+
 export function serializeProject(project: TrackerProject): string {
   return JSON.stringify({ ...project, updatedAt: new Date().toISOString() }, null, 2)
 }

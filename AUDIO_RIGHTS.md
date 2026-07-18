@@ -6,4 +6,4 @@ The archived audio files are recordings downloaded from the N9NES9 channel at th
 
 YouTube-derived poster images and archived recordings are not granted for reuse by the application code license. If you are a rights holder and need a credit corrected or an item removed, open an issue in this repository.
 
-The Epic Sax Guy bonus is not copied into this repository. It is played through YouTube's official Eurovision-hosted embed and remains subject to YouTube and the rights holders' terms.
+The Epic Sax Guy bonus does not copy the original recording into this repository. It is a browser-synthesized chiptune arrangement with attribution and a link to the official Eurovision-hosted performance. The composition and performance remain subject to their rights holders' terms.

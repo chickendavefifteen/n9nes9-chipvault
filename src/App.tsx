@@ -10,6 +10,7 @@ import {
   importFamiTrackerText,
   midiToNote,
   parseProject,
+  preferShippedBaseline,
   serializeProject,
 } from './lib/project'
 import { buildUpdateAction, BUILD_ID, fetchBuildManifest } from './lib/versioning'
@@ -39,7 +40,7 @@ function loadProject(track: LibraryTrack): TrackerProject {
   if (!stored) return recovered ?? createDraft(track)
   try {
     const saved = parseProject(stored)
-    return recovered && saved.contentRevision < recovered.contentRevision ? recovered : saved
+    return preferShippedBaseline(saved, recovered)
   } catch {
     return recovered ?? createDraft(track)
   }
@@ -159,13 +160,20 @@ function App() {
     broadcastPlayback()
     void engine.unlock()
     const rowDuration = 60 / project.tempo / 4
+    const sessionTicks = selectedTrack.kind === 'bonus' ? Math.ceil(selectedTrack.duration / rowDuration) : Number.POSITIVE_INFINITY
+    let elapsedTicks = 0
     let row = playhead
     const tick = () => {
+      if (elapsedTicks >= sessionTicks) {
+        stopChip('Ten-minute bonus session finished')
+        return
+      }
       setPlayhead(row)
       channels.forEach((channel) => {
         if (!muted.has(channel.id)) engine.play(project.cells[channel.id][row], channel, rowDuration * 0.9)
       })
       row += 1
+      elapsedTicks += 1
       if (row >= project.rows) {
         if (project.loop) row = 0
         else stopChip('Finished')
@@ -175,7 +183,7 @@ function App() {
     timerRef.current = window.setInterval(tick, rowDuration * 1000)
     setPlaying(true)
     setMessage(nextMessage)
-  }, [broadcastPlayback, muted, pauseReference, playhead, project, stopChip])
+  }, [broadcastPlayback, muted, pauseReference, playhead, project, selectedTrack.duration, selectedTrack.kind, stopChip])
 
   const armSourceWatchdog = useCallback((attempt: number, initialTime: number) => {
     clearSourceWatchdog()
@@ -462,10 +470,6 @@ function App() {
   }
 
   function toggleTransport() {
-    if (selectedTrack.externalVideoId) {
-      setMessage('Use the official YouTube controls for the bonus session')
-      return
-    }
     if (playbackActive) {
       stopEverything('Paused')
       return
@@ -475,7 +479,7 @@ function App() {
   }
 
   const setEditMode = (next: boolean) => {
-    if (next === editing || selectedTrack.externalVideoId) return
+    if (next === editing) return
     stopEverything()
     setEditing(next)
     setMessage(next ? 'Editing a browser working copy' : 'Viewing recovered source')
@@ -521,7 +525,7 @@ function App() {
           <span className="brand-mark" aria-hidden="true"><i /><i /><i /><i /></span>
           <span><b>N9NES9</b><em>CHIPVAULT</em></span>
         </a>
-        <div className="topbar-status"><span className="live-dot" /> Online tracker · 17 recordings + bonus</div>
+        <div className="topbar-status"><span className="live-dot" /> Online tracker · 18 editable patterns</div>
         <button className="ghost-button" onClick={() => setAboutOpen(true)}>About the recovery</button>
       </header>
 
@@ -560,28 +564,29 @@ function App() {
             <h2>{selectedTrack.shortTitle}</h2>
             <p>{selectedTrack.description}</p>
             {selectedTrack.credit && <p className="credit">{selectedTrack.credit}</p>}
-            {!selectedTrack.externalVideoId && <div className="workspace-mode" aria-label="Workspace mode">
+            <div className="workspace-mode" aria-label="Workspace mode">
               <button className={!editing ? 'active' : ''} onClick={() => setEditMode(false)}><span>View</span><small>source animation</small></button>
               <button className={editing ? 'active' : ''} onClick={() => setEditMode(true)}><span>Edit</span><small>browser workspace</small></button>
               <details className="export-menu mode-export"><summary>Export</summary><div><button onClick={exportNative}>Chipvault JSON</button><button onClick={exportFami}>FamiTracker TXT</button>{selectedTrack.audio && <a href={asset(selectedTrack.audio)} download={`${selectedTrack.slug}.m4a`}>Source audio M4A</a>}<button onClick={() => importRef.current?.click()}>Import project</button>{editing && <button className="danger-action" onClick={reset}>Reset edits</button>}</div></details>
-            </div>}
+            </div>
             {selectedTrack.audio && <div className="source-player">
               <audio ref={audioRef} key={selectedTrack.id} src={asset(selectedTrack.audio)} controls preload="auto" playsInline onPlaying={handleReferencePlaying} onPause={handleReferencePause} onWaiting={handleReferenceWaiting} onStalled={handleReferenceWaiting} onEnded={handleReferenceEnded} onError={handleReferenceError} onTimeUpdate={syncReference} />
               <a className="youtube-link" href={selectedTrack.sourceUrl} target="_blank" rel="noreferrer">Original upload ↗</a>
             </div>}
-            {selectedTrack.externalVideoId && <div className="bonus-source"><span>Official external stream</span><a href={selectedTrack.sourceUrl} target="_blank" rel="noreferrer">Open on YouTube ↗</a></div>}
+            {selectedTrack.kind === 'bonus' && <div className="bonus-source"><span>Browser chiptune arrangement</span><a href={selectedTrack.sourceUrl} target="_blank" rel="noreferrer">Reference performance ↗</a></div>}
           </div>
         </section>
 
         {!storageHealthy && <section className="storage-warning" role="status"><strong>Temporary browser session</strong><span>This browser blocked local storage. The editor still works, but export Chipvault JSON before closing the tab if you want to keep changes.</span></section>}
 
-        {selectedTrack.externalVideoId ? (
-          <BonusPlayer track={selectedTrack} />
-        ) : <>
-        <section className={`recovery-banner ${project.recoveryStatus === 'pattern-recovered' ? 'recovered' : ''}`}>
+        <section className={`recovery-banner ${project.recoveryStatus}`}>
           <span className="warning-icon" aria-hidden="true">!</span>
           {project.recoveryStatus === 'pattern-recovered' ? (
             <div><strong>Animated pattern recovered from the video · {Math.round((project.sourceSync?.confidence ?? 0) * 100)}% transcription confidence</strong><p>{project.rows / project.patternLength} visible FamiTracker orders are synchronised to the original recording. Hidden instrument envelopes remain reconstructed, not original.</p></div>
+          ) : project.recoveryStatus === 'audio-transcribed' ? (
+            <div><strong>Audio-derived editable pattern · {Math.round((project.sourceSync?.confidence ?? 0) * 100)}% pitch confidence</strong><p>Dominant notes, bass, harmony, and rhythm were extracted from the preserved mix. It is populated and playable, but it is not claimed to be the lost original channel data.</p></div>
+          ) : project.recoveryStatus === 'arranged-cover' ? (
+            <div><strong>Editable VRC6-style chiptune arrangement · ten-minute session</strong><p>The recognizable sax riff, harmony, bass, and drums are synthesized by the browser tracker and loop as editable pattern data.</p></div>
           ) : (
             <div><strong>Recovery draft — original module not yet found</strong><p>The recording is authentic. Pattern data starts blank until transcribed or an original FTM is imported. Edits are autosaved only in this browser.</p></div>
           )}
@@ -632,7 +637,7 @@ function App() {
             </div>
             <p><kbd>A–K</kbd> enter notes · <kbd>Z/X</kbd> octave · <kbd>Del</kbd> clear · <kbd>Space</kbd> play</p></> : <div className="view-mode-copy"><strong>Fixed playhead · moving pattern</strong><span>Press Play to follow the recovered grid in time with the original recording.</span></div>}
           </div>
-        </section></>}
+        </section>
         <input ref={importRef} type="file" accept=".json,.txt" hidden onChange={(event) => { const file = event.target.files?.[0]; if (file) void onImport(file); event.target.value = '' }} />
         <footer><span>{message}</span><span>Build {BUILD_ID} · no analytics · data stays local</span></footer>
       </main>
@@ -752,23 +757,6 @@ function PianoRoll({ project, channelId, selectedRow, editing, onChannel, onSetN
   )
 }
 
-function BonusPlayer({ track }: { track: LibraryTrack }) {
-  const videoId = track.externalVideoId as string
-  const end = track.externalEnd ?? 600
-  const embedUrl = `https://www.youtube-nocookie.com/embed/${videoId}?end=${end}&rel=0&playsinline=1`
-  return (
-    <section className="bonus-player" aria-labelledby="bonus-player-title">
-      <div className="bonus-copy">
-        <p className="eyebrow">Bonus transmission / 10:00</p>
-        <h3 id="bonus-player-title">Ten minutes of maximum sax.</h3>
-        <p>This uses the official Eurovision player and stops at the ten-minute mark. It is an external bonus stream, so it is deliberately not included in Chipvault downloads or FamiTracker exports.</p>
-        <div className="bonus-meter" aria-hidden="true">{Array.from({ length: 24 }, (_, index) => <i key={index} style={{ '--delay': `${index * -0.07}s` } as React.CSSProperties} />)}</div>
-      </div>
-      <div className="bonus-frame"><iframe src={embedUrl} title="Official Epic Sax Guy ten-minute bonus session" allow="accelerometer; autoplay; encrypted-media; gyroscope; picture-in-picture" allowFullScreen /></div>
-    </section>
-  )
-}
-
 function AboutDialog({ onClose }: { onClose: () => void }) {
   return (
     <div className="dialog-backdrop" onMouseDown={onClose}>
@@ -777,8 +765,8 @@ function AboutDialog({ onClose }: { onClose: () => void }) {
         <p className="eyebrow">Recovery notes</p>
         <h2 id="about-title">The audio survived.<br />The visible patterns can too.</h2>
         <p>YouTube stores the finished mix rather than an FTM file, but these uploads also recorded the FamiTracker grid. Chipvault can transcribe visible notes, instruments, effects, and order boundaries from those frames.</p>
-        <p>Hidden instrument macros still have to be reconstructed and every result is confidence-labelled. Game Complete Loop is the first synchronized recovery; the remaining recordings stay honest blank drafts until their video frames are decoded.</p>
-        <div className="dialog-facts"><div><strong>17</strong><span>music recordings</span></div><div><strong>8</strong><span>NES + VRC6 channels</span></div><div><strong>1</strong><span>synchronized recovery</span></div></div>
+        <p>Hidden instrument macros still have to be reconstructed and every result is confidence-labelled. Game Complete Loop retains its frame-recovered data; the other preserved mixes now open populated audio-derived drafts instead of blank grids.</p>
+        <div className="dialog-facts"><div><strong>18</strong><span>editable patterns</span></div><div><strong>8</strong><span>NES + VRC6 channels</span></div><div><strong>0</strong><span>blank track baselines</span></div></div>
         <button className="primary-action dialog-action" onClick={onClose}>Back to the editor</button>
       </section>
     </div>

@@ -6,7 +6,7 @@ The source recordings are preserved locally in the site. Each track also has an 
 
 ## Recovery integrity
 
-The audio recordings are authentic channel downloads. **Game Complete Loop** has the first video-frame recovery: two visible 64-row orders, source-audio synchronization, and confidence-labelled reconstructed instruments. The other editable patterns start blank until their recorded FamiTracker grids are transcribed. The UI labels both states everywhere they matter. A recovered module can be imported as either:
+The audio recordings are authentic channel downloads. **Game Complete Loop** has the first video-frame recovery: two visible 64-row orders, source-audio synchronization, and confidence-labelled reconstructed instruments. The other recordings now open populated, editable audio-derived drafts generated from dominant-pitch and onset analysis of the preserved mix. These are explicitly labelled as lower-confidence drafts rather than lost original modules. A project can be imported as either:
 
 - Chipvault JSON (`.chipvault.json`) for lossless browser-editor round trips.
 - FamiTracker 0.4.6 text (`.txt`) for FamiTracker/FamiStudio interoperability.
@@ -36,7 +36,7 @@ Deploy only with:
 npm run deploy:pages
 ```
 
-The deploy command tests and builds first, overlays `dist` onto the existing `gh-pages` branch, and refuses to push if the previous, current, or known historical HTML references a missing hashed asset. Historical entrypoint names are refreshed with the current tested bundle, so reloading an old cached page cannot revive obsolete playback code. Do not force-replace the Pages branch: GitHub caches HTML for ten minutes, so deleting an older hash can blank browsers that still hold the previous HTML.
+The deploy command tests and builds first, overlays `dist` onto the existing `gh-pages` branch, and refuses to push if the previous, current, or known historical HTML references a missing hashed asset. Historical entrypoint names are refreshed with the current tested bundle. GitHub Pages forces a ten-minute document cache, so the inline navigation bootstrap requests a unique `fresh` URL on every visit/reload and then restores the clean visible URL without a second navigation. Do not force-replace the Pages branch.
 
 Playback is intentionally single-tab: starting sound in one current Chipvault tab pauses any other current tab. Source audio drives the tracker animation for every recording, loops when Loop is enabled, and falls back to the already-unlocked chip engine if browser media playback is rejected or stalls.
 
@@ -47,7 +47,7 @@ The published site is served from the generated `gh-pages` branch. The editable 
 - 9 original tracks
 - 7 cover arrangements with source credits retained where known
 - 1 technique demo
-- 1 externally streamed bonus, kept outside the downloadable archive
+- 1 editable VRC6-style Epic Sax Guy bonus arrangement with no copied source recording
 - 2 tutorials documented but excluded from the music archive
 
 See [SPEC.md](./SPEC.md) for the anchored requirements, acceptance checks, assumptions, and unknowns.
