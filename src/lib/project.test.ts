@@ -44,9 +44,11 @@ describe('Chipvault project interchange', () => {
     const project = createDraft(library[0])
     project.cells.pulse1[0].note = 'C-4'
     project.cells.pulse1[0].edited = true
+    project.previewStartRow = 0
     const restored = parseProject(serializeProject(project))
     expect(restored.cells.pulse1[0].note).toBe('C-4')
     expect(restored.cells.pulse1[0].edited).toBe(true)
+    expect(restored.previewStartRow).toBe(0)
     expect(restored.sourceId).toBe(library[0].id)
     expect(exportFamiTrackerText(restored)).not.toContain('EDIT')
   })
@@ -68,25 +70,27 @@ describe('Chipvault project interchange', () => {
     const olderEditedProject = createDraft(track)
     olderEditedProject.cells.vrc6Pulse1[0].note = 'C-5'
     olderEditedProject.cells.vrc6Pulse1[0].edited = true
+    olderEditedProject.previewStartRow = 0
     olderEditedProject.tempo = 123
     const merged = preferShippedBaseline(olderEditedProject, shipped)
     expect(merged).not.toBe(olderEditedProject)
     expect(merged.contentRevision).toBe(shipped.contentRevision)
     expect(merged.cells.vrc6Pulse1[0]).toMatchObject({ note: 'C-5', edited: true })
     expect(merged.tempo).toBe(123)
+    expect(merged.previewStartRow).toBe(0)
   })
 
   it('reloads only when the no-cache manifest is newer', () => {
     expect(BUILD_ID).toMatch(/^\d{4}-\d{2}-\d{2}\.\d+$/)
     expect(shouldReloadBuild(BUILD_ID)).toBe(false)
     expect(shouldReloadBuild('2026-07-18.5')).toBe(false)
-    expect(shouldReloadBuild('2026-07-18.8')).toBe(true)
+    expect(shouldReloadBuild('2026-07-18.9')).toBe(true)
     expect(shouldReloadBuild('broken')).toBe(false)
     expect(isNewerBuild('2026-07-18.6', '2026-07-18.5')).toBe(true)
-    expect(buildUpdateAction('2026-07-18.8', { playbackActive: false, editing: false, storageHealthy: true })).toBe('reload')
-    expect(buildUpdateAction('2026-07-18.8', { playbackActive: true, editing: false, storageHealthy: true })).toBe('notify')
-    expect(buildUpdateAction('2026-07-18.8', { playbackActive: false, editing: true, storageHealthy: true })).toBe('notify')
-    expect(buildUpdateAction('2026-07-18.8', { playbackActive: false, editing: false, storageHealthy: false })).toBe('notify')
+    expect(buildUpdateAction('2026-07-18.9', { playbackActive: false, editing: false, storageHealthy: true })).toBe('reload')
+    expect(buildUpdateAction('2026-07-18.9', { playbackActive: true, editing: false, storageHealthy: true })).toBe('notify')
+    expect(buildUpdateAction('2026-07-18.9', { playbackActive: false, editing: true, storageHealthy: true })).toBe('notify')
+    expect(buildUpdateAction('2026-07-18.9', { playbackActive: false, editing: false, storageHealthy: false })).toBe('notify')
   })
 
   it('exports the required FamiTracker 0.4.6 text sections', () => {

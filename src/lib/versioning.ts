@@ -1,4 +1,4 @@
-export const BUILD_ID = '2026-07-18.7'
+export const BUILD_ID = '2026-07-18.8'
 
 export interface BuildManifest {
   build: string

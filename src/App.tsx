@@ -53,6 +53,18 @@ function filename(title: string, extension: string): string {
   return `${title.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, '')}.${extension}`
 }
 
+function projectPreviewRow(project: TrackerProject): number | null {
+  const storedRow = project.previewStartRow
+  if (typeof storedRow === 'number' && Number.isInteger(storedRow) && storedRow >= 0 && storedRow < project.rows) {
+    return storedRow
+  }
+  let editedRow: number | null = null
+  for (let row = 0; row < project.rows; row += 1) {
+    if (channels.some((channel) => project.cells[channel.id][row].edited)) editedRow = row
+  }
+  return editedRow
+}
+
 function App() {
   const defaultTrack = library.find((track) => track.recoveryStatus === 'pattern-recovered') ?? library[0]
   const initialTrack = library.find((track) => `#${track.slug}` === window.location.hash) ?? defaultTrack
@@ -73,6 +85,7 @@ function App() {
   const [editing, setEditing] = useState(false)
   const [previewMode, setPreviewMode] = useState<PreviewMode>(initialTrack.audio ? 'source' : 'chip')
   const [chipPurpose, setChipPurpose] = useState<ChipPurpose | null>(null)
+  const [lastEditedRow, setLastEditedRow] = useState<number | null>(() => projectPreviewRow(project))
   const [playhead, setPlayhead] = useState(0)
   const [muted, setMuted] = useState<Set<ChannelId>>(new Set())
   const [message, setMessage] = useState('Ready')
@@ -90,6 +103,8 @@ function App() {
   const tabIdRef = useRef(`tab-${Date.now().toString(36)}-${Math.random().toString(36).slice(2)}`)
   const playbackActiveRef = useRef(false)
   const editingRef = useRef(editing)
+  const previewModeRef = useRef<PreviewMode>(previewMode)
+  const chipStartRowRef = useRef(playhead)
   const storageHealthyRef = useRef(storageHealthy)
 
   const filtered = useMemo(() => library.filter((track) => {
@@ -104,7 +119,14 @@ function App() {
   const referenceActive = referenceStarting || referencePlaying
   const playbackActive = playing || referenceActive
   const transportMode = playing ? (chipPurpose === 'fallback' ? 'chip-fallback' : 'chip-preview') : referencePlaying ? 'source-playing' : referenceStarting ? 'source-starting' : 'idle'
-  const playbackName = editing && previewMode === 'chip' ? 'edited chip preview' : selectedTrack.audio ? 'original recording' : 'edited chip preview'
+  const playbackName = referenceActive
+    ? 'original recording'
+    : playing
+      ? 'edited chip preview'
+      : editing && previewMode === 'chip'
+        ? 'edited chip preview'
+        : selectedTrack.audio ? 'original recording' : 'edited chip preview'
+  const editedStartLabel = lastEditedRow === null ? null : `${Math.floor(lastEditedRow / project.patternLength).toString(16).padStart(2, '0').toUpperCase()}:${(lastEditedRow % project.patternLength).toString(16).padStart(2, '0').toUpperCase()}`
   const savedTime = lastSavedAt === null ? null : new Date(lastSavedAt).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', second: '2-digit' })
   const saveText = saveStatus === 'temporary'
     ? 'Not saved · export to keep'
@@ -115,8 +137,9 @@ function App() {
   useEffect(() => {
     playbackActiveRef.current = playbackActive
     editingRef.current = editing
+    previewModeRef.current = previewMode
     storageHealthyRef.current = storageHealthy
-  }, [editing, playbackActive, storageHealthy])
+  }, [editing, playbackActive, previewMode, storageHealthy])
 
   const commit = useCallback((mutate: (draft: TrackerProject) => void) => {
     setSaveStatus(storageHealthyRef.current ? 'saving' : 'temporary')
@@ -155,8 +178,29 @@ function App() {
   const stopEverything = useCallback((nextMessage?: string) => {
     stopChip()
     pauseReference()
+    playbackActiveRef.current = false
     if (nextMessage) setMessage(nextMessage)
   }, [pauseReference, stopChip])
+
+  const armEditedPreview = useCallback((row: number, detail: string) => {
+    previewModeRef.current = 'chip'
+    chipStartRowRef.current = row
+    if (playbackActiveRef.current) stopEverything()
+    const order = Math.floor(row / project.patternLength).toString(16).padStart(2, '0').toUpperCase()
+    const patternRow = (row % project.patternLength).toString(16).padStart(2, '0').toUpperCase()
+    setPreviewMode('chip')
+    setPlayhead(row)
+    setLastEditedRow(row)
+    setMessage(`${detail} · Edited preview armed at ${order}:${patternRow}`)
+  }, [project.patternLength, stopEverything])
+
+  const commitPreviewEdit = useCallback((mutate: (draft: TrackerProject) => void, row: number, detail: string) => {
+    commit((draft) => {
+      mutate(draft)
+      draft.previewStartRow = row
+    })
+    armEditedPreview(row, detail)
+  }, [armEditedPreview, commit])
 
   const broadcastPlayback = useCallback(() => {
     const signal = createPlaybackSignal(tabIdRef.current, BUILD_ID)
@@ -166,7 +210,7 @@ function App() {
 
   const syncReference = useCallback(() => {
     const audio = audioRef.current
-    if (!audio) return
+    if (!audio || (editingRef.current && previewModeRef.current === 'chip')) return
     setPlayhead(Math.floor(sourceRowPosition(audio.currentTime, project.sourceSync, project.tempo, project.rows)))
   }, [project.rows, project.sourceSync, project.tempo])
 
@@ -176,17 +220,21 @@ function App() {
     broadcastPlayback()
     void engine.unlock()
     setChipPurpose(purpose)
-    if (purpose === 'fallback') setPreviewMode('chip')
+    if (purpose === 'fallback') {
+      previewModeRef.current = 'chip'
+      setPreviewMode('chip')
+    }
     const rowDuration = 60 / project.tempo / 4
     const sessionTicks = selectedTrack.kind === 'bonus' ? Math.ceil(selectedTrack.duration / rowDuration) : Number.POSITIVE_INFINITY
     let elapsedTicks = 0
-    let row = playhead
+    let row = purpose === 'preview' && editingRef.current ? chipStartRowRef.current : playhead
     const tick = () => {
       if (elapsedTicks >= sessionTicks) {
         stopChip('Ten-minute bonus session finished')
         return
       }
       setPlayhead(row)
+      chipStartRowRef.current = row
       channels.forEach((channel) => {
         if (!muted.has(channel.id)) engine.play(project.cells[channel.id][row], channel, rowDuration * 0.9)
       })
@@ -194,8 +242,13 @@ function App() {
       elapsedTicks += 1
       if (row >= project.rows) {
         if (project.loop) row = 0
-        else stopChip('Finished')
+        else {
+          chipStartRowRef.current = Math.max(0, project.rows - 1)
+          stopChip('Finished')
+          return
+        }
       }
+      chipStartRowRef.current = row
     }
     tick()
     timerRef.current = window.setInterval(tick, rowDuration * 1000)
@@ -258,18 +311,23 @@ function App() {
 
   const selectTrack = (track: LibraryTrack) => {
     if (track.id === selectedId) return
+    const nextProject = loadProject(track)
+    const nextPreviewRow = projectPreviewRow(nextProject)
     stopEverything()
     setSelectedId(track.id)
-    setProject(loadProject(track))
+    setProject(nextProject)
     setUndoStack([])
     setRedoStack([])
-    setPlayhead(0)
+    setPlayhead(nextPreviewRow ?? 0)
     setSelectedRow(0)
     setSelectedChannel('pulse1')
     setView('tracker')
     setMuted(new Set())
     setEditing(false)
+    previewModeRef.current = track.audio ? 'source' : 'chip'
+    chipStartRowRef.current = nextPreviewRow ?? 0
     setPreviewMode(track.audio ? 'source' : 'chip')
+    setLastEditedRow(nextPreviewRow)
     setSaveStatus(browserStorage() ? 'saving' : 'temporary')
     setLastSavedAt(null)
     window.history.replaceState(null, '', `#${track.slug}`)
@@ -376,13 +434,12 @@ function App() {
   const setNote = useCallback((channelId: ChannelId, row: number, note: string | null) => {
     if (!editing) return
     const previous = project.cells[channelId][row]
-    commit((draft) => {
+    commitPreviewEdit((draft) => {
       draft.cells[channelId][row].note = note
       draft.cells[channelId][row].edited = true
-    })
+    }, row, note ? `${note} entered and autosaving` : 'Note cleared and autosaving')
     setSelectedChannel(channelId)
     setSelectedRow(row)
-    setMessage(note ? `${note} entered · autosaving in this browser` : 'Note cleared · autosaving in this browser')
     const channel = channels.find((candidate) => candidate.id === channelId)
     if (note && channel && !playbackActiveRef.current) {
       void engine.unlock().then((unlocked) => {
@@ -390,7 +447,7 @@ function App() {
         engine.play({ ...previous, note, instrument: previous.instrument ?? 0, volume: previous.volume ?? 12, edited: true }, channel, 0.22)
       })
     }
-  }, [commit, editing, project.cells])
+  }, [commitPreviewEdit, editing, project.cells])
 
   useEffect(() => {
     const keys = ['a', 'w', 's', 'e', 'd', 'f', 't', 'g', 'y', 'h', 'u', 'j', 'k']
@@ -425,7 +482,7 @@ function App() {
     setUndoStack((stack) => stack.slice(0, -1))
     setSaveStatus(storageHealthyRef.current ? 'saving' : 'temporary')
     setProject(previous)
-    setMessage('Undid edit')
+    armEditedPreview(selectedRow, 'Undo applied')
   }
 
   const redo = () => {
@@ -435,7 +492,7 @@ function App() {
     setRedoStack((stack) => stack.slice(0, -1))
     setSaveStatus(storageHealthyRef.current ? 'saving' : 'temporary')
     setProject(next)
-    setMessage('Redid edit')
+    armEditedPreview(selectedRow, 'Redo applied')
   }
 
   const onImport = async (file: File) => {
@@ -446,9 +503,9 @@ function App() {
         : parseProject(text)
       const shippedRevision = recoveredProjectForTrack(selectedTrack)?.contentRevision ?? 0
       setUndoStack((stack) => [...stack, cloneProject(project)])
-      setProject({ ...imported, sourceId: selectedTrack.id, contentRevision: Math.max(imported.contentRevision, shippedRevision + 1) })
+      setProject({ ...imported, sourceId: selectedTrack.id, contentRevision: Math.max(imported.contentRevision, shippedRevision + 1), previewStartRow: 0 })
       setSaveStatus(storageHealthyRef.current ? 'saving' : 'temporary')
-      setMessage(`Imported ${file.name}`)
+      armEditedPreview(0, `Imported ${file.name}`)
     } catch (error) {
       setMessage(error instanceof Error ? error.message : 'Import failed')
     }
@@ -519,10 +576,20 @@ function App() {
     stopEverything()
     setEditing(next)
     if (next) {
-      const mode: PreviewMode = selectedTrack.audio ? 'source' : 'chip'
+      const savedEditRow = projectPreviewRow(project)
+      const mode: PreviewMode = selectedTrack.audio && savedEditRow === null ? 'source' : 'chip'
+      previewModeRef.current = mode
       setPreviewMode(mode)
-      setMessage(mode === 'source' ? 'Editing · original recording selected · changes autosave here' : 'Editing browser chiptune · changes autosave here')
+      if (savedEditRow !== null) {
+        chipStartRowRef.current = savedEditRow
+        setLastEditedRow(savedEditRow)
+        setPlayhead(savedEditRow)
+      }
+      setMessage(mode === 'source'
+        ? 'Editing · original recording selected · the first change will arm Edited preview'
+        : `Editing saved chiptune${savedEditRow === null ? '' : ' · Edited preview restored at the last changed row'}`)
     } else {
+      previewModeRef.current = selectedTrack.audio ? 'source' : 'chip'
       setPreviewMode(selectedTrack.audio ? 'source' : 'chip')
       setMessage('Viewing recovered source')
     }
@@ -530,11 +597,17 @@ function App() {
 
   const choosePreview = (next: PreviewMode) => {
     if (next === 'source' && !selectedTrack.audio) return
+    previewModeRef.current = next
     stopEverything()
     setPreviewMode(next)
+    if (next === 'chip') {
+      const startRow = lastEditedRow ?? playhead
+      chipStartRowRef.current = startRow
+      setPlayhead(startRow)
+    }
     setMessage(next === 'source'
       ? 'Original recording selected · authentic mix, edits remain visible'
-      : 'Edited chip preview selected · approximate synthesized mix')
+      : `Edited chip preview selected${editedStartLabel ? ` · starts at ${editedStartLabel}` : ''}`)
   }
 
   const setEditorView = (next: ViewMode) => {
@@ -547,6 +620,7 @@ function App() {
   const returnToStart = () => {
     stopEverything()
     if (audioRef.current) audioRef.current.currentTime = project.sourceSync?.audioOffset ?? 0
+    chipStartRowRef.current = 0
     setPlayhead(0)
     setMessage('Returned to first row')
   }
@@ -556,7 +630,7 @@ function App() {
     setUndoStack((stack) => [...stack, cloneProject(project)])
     setSaveStatus(storageHealthyRef.current ? 'saving' : 'temporary')
     setProject(recoveredProjectForTrack(selectedTrack) ?? createDraft(selectedTrack))
-    setMessage('Restored the clean recovery baseline')
+    armEditedPreview(0, 'Restored the clean recovery baseline')
   }
 
   const reloadCurrentBuild = () => {
@@ -646,9 +720,9 @@ function App() {
               <button className="play-button" onClick={toggleTransport} aria-label={playbackActive ? `Pause ${playbackName}` : `Play ${playbackName}`} title={playbackActive ? `Pause ${playbackName}` : `Play ${playbackName}`}>{playbackActive ? '■' : '▶'}</button>
               <button onClick={returnToStart} aria-label="Return to first row">↤</button>
             </div>
-            <label>BPM<input type="number" min="32" max="300" disabled={!editing} value={project.tempo} onChange={(event) => commit((draft) => { draft.tempo = Number(event.target.value) })} /></label>
-            <label>Speed<input type="number" min="1" max="31" disabled={!editing} value={project.speed} onChange={(event) => commit((draft) => { draft.speed = Number(event.target.value) })} /></label>
-            <label className="loop-control"><input type="checkbox" disabled={!editing} checked={project.loop} onChange={(event) => commit((draft) => { draft.loop = event.target.checked })} /> Loop</label>
+            <label>BPM<input type="number" min="32" max="300" disabled={!editing} value={project.tempo} onChange={(event) => commitPreviewEdit((draft) => { draft.tempo = Number(event.target.value) }, selectedRow, 'Tempo changed and autosaving')} /></label>
+            <label>Speed<input type="number" min="1" max="31" disabled={!editing} value={project.speed} onChange={(event) => commitPreviewEdit((draft) => { draft.speed = Number(event.target.value) }, selectedRow, 'Speed changed and autosaving')} /></label>
+            <label className="loop-control"><input type="checkbox" disabled={!editing} checked={project.loop} onChange={(event) => commitPreviewEdit((draft) => { draft.loop = event.target.checked }, selectedRow, 'Loop setting changed and autosaving')} /> Loop</label>
             <div className="transport-spacer" />
             <button onClick={undo} disabled={!undoStack.length} title="Undo">↶</button>
             <button onClick={redo} disabled={!redoStack.length} title="Redo">↷</button>
@@ -658,11 +732,11 @@ function App() {
           {editing && <div className="edit-session-bar">
             <div className="preview-switch" role="group" aria-label="Playback preview">
               <button className={previewMode === 'source' ? 'active' : ''} disabled={!selectedTrack.audio} onClick={() => choosePreview('source')}><span>Original mix</span><small>{selectedTrack.audio ? 'authentic recording' : 'unavailable'}</small></button>
-              <button className={previewMode === 'chip' ? 'active' : ''} onClick={() => choosePreview('chip')}><span>Edited preview</span><small>browser chiptune</small></button>
+              <button className={previewMode === 'chip' ? 'active' : ''} onClick={() => choosePreview('chip')}><span>Edited preview</span><small>{editedStartLabel ? `next Play · ${editedStartLabel}` : 'browser chiptune'}</small></button>
             </div>
             <p>{previewMode === 'source'
               ? <><strong>Authentic sound</strong><span>Your edits stay visible and each entered note is auditioned. Switch to Edited preview to hear the whole editable draft.</span></>
-              : <><strong>Approximate edited sound</strong><span>This synthesizes the reconstructed notes, so it will not match the original recording exactly.</span></>}</p>
+              : <><strong>{editedStartLabel ? `Edited preview armed · ${editedStartLabel}` : 'Approximate edited sound'}</strong><span>{editedStartLabel ? `Next Play starts on the changed row and uses the autosaved editable pattern.` : 'This synthesizes the reconstructed notes, so it will not match the original recording exactly.'}</span></>}</p>
             <div className={`edit-save-card ${saveStatus}`} role="status" aria-live="polite"><i /><span><strong>{saveStatus === 'temporary' ? 'Not saved' : saveStatus === 'saving' ? 'Saving…' : 'Saved locally'}</strong><small>{saveStatus === 'temporary' ? 'Export JSON before closing' : savedTime ? `This browser · ${savedTime} · ${editedCount} edit${editedCount === 1 ? '' : 's'}` : 'Autosave is ready'}</small></span></div>
           </div>}
 
@@ -689,8 +763,8 @@ function App() {
               <button className="clear-note" onClick={() => setNote(selectedChannel, selectedRow, null)}>clear</button>
             </div>
             <div className="cell-inspector">
-              <label>Volume <input type="range" min="0" max="15" value={selectedCell.volume ?? 15} onChange={(event) => commit((draft) => { const cell = draft.cells[selectedChannel][selectedRow]; cell.volume = Number(event.target.value); cell.edited = true })} /><output>{(selectedCell.volume ?? 15).toString(16).toUpperCase()}</output></label>
-              <label>Effect <input aria-label="Effect command" value={selectedCell.effect} maxLength={3} placeholder="0xy" onChange={(event) => { const value = event.target.value.toUpperCase().replace(/[^0-9A-FP-Z]/g, '').slice(0, 3); commit((draft) => { const cell = draft.cells[selectedChannel][selectedRow]; cell.effect = value; cell.edited = true }) }} /></label>
+              <label>Volume <input type="range" min="0" max="15" value={selectedCell.volume ?? 15} onChange={(event) => commitPreviewEdit((draft) => { const cell = draft.cells[selectedChannel][selectedRow]; cell.volume = Number(event.target.value); cell.edited = true }, selectedRow, 'Volume changed and autosaving')} /><output>{(selectedCell.volume ?? 15).toString(16).toUpperCase()}</output></label>
+              <label>Effect <input aria-label="Effect command" value={selectedCell.effect} maxLength={3} placeholder="0xy" onChange={(event) => { const value = event.target.value.toUpperCase().replace(/[^0-9A-FP-Z]/g, '').slice(0, 3); commitPreviewEdit((draft) => { const cell = draft.cells[selectedChannel][selectedRow]; cell.effect = value; cell.edited = true }, selectedRow, 'Effect changed and autosaving') }} /></label>
             </div>
             <p><kbd>A–K</kbd> enter notes · <kbd>Z/X</kbd> octave · <kbd>Del</kbd> clear · <kbd>Space</kbd> play</p></> : <div className="view-mode-copy"><strong>Fixed playhead · moving pattern</strong><span>Press Play to follow the recovered grid in time with the original recording.</span></div>}
           </div>

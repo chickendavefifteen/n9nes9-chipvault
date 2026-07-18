@@ -49,6 +49,7 @@ export function preferShippedBaseline(saved: TrackerProject, shipped: TrackerPro
   merged.tempo = saved.tempo
   merged.speed = saved.speed
   merged.loop = saved.loop
+  merged.previewStartRow = saved.previewStartRow
   merged.updatedAt = saved.updatedAt
   return merged
 }

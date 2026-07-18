@@ -13,7 +13,7 @@ The audio recordings are authentic channel downloads. **Game Complete Loop** has
 
 The editor exports the same two formats, including multi-pattern FamiTracker text round trips. Export is a separate optional action. It does not invent a binary `.ftm` wrapper.
 
-The application itself is cloud-hosted on GitHub Pages. Working copies currently persist in the browser; genuine cross-device saving requires a writable authenticated backend and is deliberately not misrepresented as active. Edit mode shows a timestamped **Saved in this browser** state. Its **Original mix** plays the authentic recording, while **Edited preview** deliberately plays the approximate editable reconstruction; entered notes are auditioned immediately in either mode.
+The application itself is cloud-hosted on GitHub Pages. Working copies currently persist in the browser; genuine cross-device saving requires a writable authenticated backend and is deliberately not misrepresented as active. Edit mode shows a timestamped **Saved in this browser** state. Its **Original mix** plays the authentic recording, while **Edited preview** deliberately plays the approximate editable reconstruction. Entering a note auditions it immediately, automatically arms Edited preview, and places the next Play on that changed row so the saved difference is actually heard.
 
 ## Local development
 

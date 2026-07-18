@@ -66,5 +66,6 @@ export interface TrackerProject {
   updatedAt: string
   recoveryStatus: RecoveryStatus
   contentRevision: number
+  previewStartRow?: number
   sourceSync?: SourceSync
 }

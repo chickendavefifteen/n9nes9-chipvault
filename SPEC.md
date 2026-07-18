@@ -50,6 +50,7 @@ A static, offline-capable archive and modern browser tracker for the music uploa
 - R29: Selecting any of the 18 library entries must load a populated editable pattern with visible note keys. The 16 recordings without frame recovery use reproducible dominant-pitch/onset analysis of the preserved mix and must not be described as exact original modules.
 - R30: Switching tracks must upgrade any older autosaved blank baseline when the shipped content revision is newer, without overwriting newer user edits.
 - R31: Edit mode must separate the authentic source recording from the approximate editable chip preview, audition entered notes, autosave every change immediately, and show an explicit browser-local saving/saved state with timestamp and edit count. A baseline upgrade must merge, not discard, cells already marked as user edits.
+- R32: Any sound-affecting edit must automatically arm Edited preview for the next Play, place its playhead on the changed row, stop an incompatible source transport, and visibly identify that start row. Original mix remains available only as an explicit A/B selection after the edit.
 
 ## Acceptance checks
 
@@ -81,6 +82,7 @@ A static, offline-capable archive and modern browser tracker for the music uploa
 - C26: Browser tests click through all 18 entries and prove the heading, recovery label, tracker table, and non-empty notes update every time.
 - C27: Repeated root reloads prove the navigation bootstrap requests a new `fresh` URL on every load, cleans the visible URL, retains the selected hash, and boots the current build with no redirect loop.
 - C28: Browser tests prove an edited note is visibly marked, reports a completed browser-local save, survives a reload and a track round trip, and can be heard separately through the labelled edited-chip preview while the labelled original-mix preview remains authentic.
+- C29: Browser tests begin in Original mix, edit a known cell to a different pitch, prove the active preview and Play label switch automatically, prove playback begins on that cell and advances under `chip-preview`, then explicitly switch back to Original mix and prove source playback remains available.
 
 ## Out of scope for this recovery pass
 
