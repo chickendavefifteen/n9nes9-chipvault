@@ -38,7 +38,8 @@ function filename(title: string, extension: string): string {
 }
 
 function App() {
-  const initialTrack = library.find((track) => `#${track.slug}` === window.location.hash) ?? library[0]
+  const defaultTrack = library.find((track) => track.recoveryStatus === 'pattern-recovered') ?? library[0]
+  const initialTrack = library.find((track) => `#${track.slug}` === window.location.hash) ?? defaultTrack
   const [selectedId, setSelectedId] = useState(initialTrack.id)
   const selectedTrack = library.find((track) => track.id === selectedId) ?? library[0]
   const [project, setProject] = useState(() => loadProject(initialTrack))
