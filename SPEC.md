@@ -37,6 +37,10 @@ A static, offline-capable archive and modern browser tracker for the music uploa
 - R16: Pause playback when the document is hidden, resynchronise on return, and check a no-cache build manifest so stale tabs reload the current deployment.
 - R17: Make the neon sunset deliberately brighter while retaining tracker contrast and disabling decorative motion for reduced-motion users.
 - R18: Add an Epic Sax Guy bonus as an official externally embedded YouTube performance limited to a ten-minute session; do not copy it into the downloadable archive or misrepresent it as N9NES9 source material.
+- R19: A Pages deployment must retain every hashed JS/CSS asset referenced by the previously deployed HTML; cached HTML must remain bootable for longer than GitHub Pages' ten-minute HTML cache window.
+- R20: Never force-replace the Pages branch with an asset-pruning orphan commit. Deploy by overlaying the tested build onto the existing branch, verify both previous and current HTML asset references, then push normally.
+- R21: Denied or unavailable browser storage must degrade to an in-memory workspace with a visible warning rather than preventing the React application from starting.
+- R22: Support current Chrome, Edge, Firefox, and Safari with an ES2019 production target, avoid unsupported runtime-only conveniences where a simple compatible equivalent exists, and render a useful static/error fallback instead of a blank page.
 
 ## Acceptance checks
 
@@ -54,6 +58,10 @@ A static, offline-capable archive and modern browser tracker for the music uploa
 - C12: Browser tests prove note, instrument, volume, and effect tokens have distinct high-contrast colors and edited cells retain an explicit user-edit marker.
 - C13: Unit and browser tests prove track/mode switching stops orphaned playback, hidden-tab recovery leaves animation coherent, and the build manifest requests a reload only for a genuinely newer build.
 - C14: The bonus entry embeds the official Eurovision-hosted video for a ten-minute session and exposes no archive-audio download or project-export claim.
+- C15: A stale copy of the previous deployed `index.html` can request each of its hashed assets from the new Pages deployment and receive HTTP 200.
+- C16: The deploy script fails before pushing if an asset referenced by either the previous or current HTML is absent from the candidate Pages tree.
+- C17: Unit tests prove storage read/write failures are contained, project cloning works without `structuredClone`, and stale/current HTML asset references are extracted correctly.
+- C18: Production build, cold-root browser boot, source playback, fixed-playhead motion, editing, track/mode switching, and the external bonus pass with no uncaught browser errors.
 
 ## Out of scope for this recovery pass
 

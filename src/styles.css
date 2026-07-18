@@ -78,6 +78,8 @@ button:focus-visible, a:focus-visible, input:focus-visible, select:focus-visible
 .update-toast { position: fixed; z-index: 30; top: 74px; right: 22px; display: grid; gap: 2px; padding: 11px 15px; border: 1px solid var(--acid); border-radius: 9px; color: #081018; background: linear-gradient(135deg, #69f7ff, #d9b0ff); box-shadow: 0 15px 50px #0009, 0 0 30px #69f7ff55; text-align: left; cursor: pointer; }
 .update-toast strong { font-size: 11px; }.update-toast span { font-family: var(--mono); font-size: 8px; }
 .hero-card { display: grid; grid-template-columns: 104px minmax(0, 1fr); gap: 16px; align-items: center; max-width: 1180px; margin: 0 auto 12px; padding: 11px; border: 1px solid #ffffff12; border-radius: 14px; background: rgba(12,10,22,.55); backdrop-filter: blur(12px); }
+.storage-warning { display: flex; align-items: baseline; gap: 10px; max-width: 1180px; margin: 0 auto 12px; padding: 10px 13px; border: 1px solid #ffb45f88; border-radius: 9px; background: #321d20e8; box-shadow: 0 0 24px #ffb45f19; }
+.storage-warning strong { color: #ffd38e; font-size: 11px; }.storage-warning span { color: #c9afa9; font-size: 10px; line-height: 1.5; }
 .hero-card > img { width: 104px; aspect-ratio: 1; object-fit: cover; border: 1px solid #ffffff20; border-radius: 9px; filter: saturate(.72) contrast(1.08); box-shadow: 0 16px 42px #0007, 0 0 28px #ff4fb81c; }
 .hero-copy { display: grid; grid-template-columns: minmax(300px, 1fr) minmax(310px, 360px); column-gap: 16px; align-items: center; }
 .hero-copy .badge-row { grid-column: 1; grid-row: 1; }
@@ -136,6 +138,7 @@ button:focus-visible, a:focus-visible, input:focus-visible, select:focus-visible
 .save-state { display: flex; align-items: center; gap: 6px; color: #686b63; font-family: var(--mono); font-size: 8px; text-transform: uppercase; }
 .save-state i { width: 5px; height: 5px; border-radius: 50%; background: #769936; }
 .save-state.has-edits { color: #ffd986; }.save-state.has-edits i { background: var(--amber); box-shadow: 0 0 10px var(--amber); }
+.save-state.temporary { color: #ffc184; }.save-state.temporary i { background: #ff8c68; box-shadow: 0 0 10px #ff8c68; }
 .transport-bar .save-button { min-width: 52px; color: #11130d; border-color: var(--acid); background: var(--acid); font-family: var(--mono); font-size: 9px; font-weight: 700; text-transform: uppercase; }
 .export-menu { position: relative; }
 .export-menu summary { display: grid; place-items: center; min-width: 58px; height: 32px; padding: 0 9px; border: 1px solid #3a3e35; border-radius: 4px; background: #22251f; font-family: var(--mono); font-size: 9px; text-transform: uppercase; cursor: pointer; list-style: none; }
@@ -164,7 +167,7 @@ button:focus-visible, a:focus-visible, input:focus-visible, select:focus-visible
 .tracker-table thead th { height: 50px; border-right: 1px solid #373146; border-bottom: 1px solid #4a405f; }
 .tracker-table thead th:not(:first-child) { width: 112px; box-shadow: inset 0 2px var(--channel); }
 .tracker-table thead button { display: grid; gap: 2px; width: 100%; height: 100%; place-content: center; border: 0; background: transparent; cursor: pointer; }
-.tracker-table thead button span { color: var(--channel); font-size: 10px; font-weight: 500; text-shadow: 0 0 10px color-mix(in srgb, var(--channel) 60%, transparent); }
+.tracker-table thead button span { color: var(--channel); font-size: 10px; font-weight: 500; text-shadow: 0 0 10px var(--channel); }
 .tracker-table thead button small { color: #62655e; font-size: 7px; font-weight: 400; }
 .tracker-table thead button.muted { opacity: .32; }
 .tracker-table tbody th { position: sticky; left: 0; z-index: 2; border-right: 1px solid #38314a; border-bottom: 1px solid #232034; background: #11101c; }

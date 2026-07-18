@@ -30,7 +30,7 @@ export function createDraft(track: LibraryTrack, rows = 64): TrackerProject {
 }
 
 export function cloneProject(project: TrackerProject): TrackerProject {
-  return structuredClone(project)
+  return JSON.parse(JSON.stringify(project)) as TrackerProject
 }
 
 export function serializeProject(project: TrackerProject): string {
@@ -55,7 +55,7 @@ export function parseProject(input: string): TrackerProject {
 }
 
 function quote(value: string): string {
-  return `"${value.replaceAll('"', "'")}"`
+  return `"${value.replace(/"/g, "'")}"`
 }
 
 function famiNote(cell: TrackerCell, channelId: ChannelId): string {

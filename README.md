@@ -30,13 +30,22 @@ npm test
 npm run build
 ```
 
-The published site is served from the generated `gh-pages` branch. The editable source remains on `main`.
+Deploy only with:
+
+```powershell
+npm run deploy:pages
+```
+
+The deploy command tests and builds first, overlays `dist` onto the existing `gh-pages` branch, and refuses to push if either the previous or current HTML references a missing hashed asset. Do not force-replace the Pages branch: GitHub caches HTML for ten minutes, so deleting an older hash can blank browsers that still hold the previous HTML.
+
+The published site is served from the generated `gh-pages` branch. The editable source remains on the source branch and is reviewed through a pull request.
 
 ## Content inventory
 
 - 9 original tracks
 - 7 cover arrangements with source credits retained where known
 - 1 technique demo
+- 1 externally streamed bonus, kept outside the downloadable archive
 - 2 tutorials documented but excluded from the music archive
 
 See [SPEC.md](./SPEC.md) for the anchored requirements, acceptance checks, assumptions, and unknowns.

@@ -36,8 +36,8 @@ describe('Chipvault project interchange', () => {
   it('reloads only when the no-cache manifest is newer', () => {
     expect(BUILD_ID).toMatch(/^\d{4}-\d{2}-\d{2}\.\d+$/)
     expect(shouldReloadBuild(BUILD_ID)).toBe(false)
-    expect(shouldReloadBuild('2026-07-18.2')).toBe(false)
-    expect(shouldReloadBuild('2026-07-18.4')).toBe(true)
+    expect(shouldReloadBuild('2026-07-18.3')).toBe(false)
+    expect(shouldReloadBuild('2026-07-18.5')).toBe(true)
     expect(shouldReloadBuild('broken')).toBe(false)
   })
 

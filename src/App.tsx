@@ -13,6 +13,7 @@ import {
   serializeProject,
 } from './lib/project'
 import { BUILD_ID, fetchBuildManifest, shouldReloadBuild } from './lib/versioning'
+import { browserStorage, safeStorageGet, safeStorageSet } from './lib/reliability'
 import type { ChannelId, LibraryTrack, TrackerProject } from './types'
 
 type ViewMode = 'tracker' | 'piano'
@@ -24,7 +25,7 @@ const asset = (path: string) => `${import.meta.env.BASE_URL}${path}`
 
 function loadProject(track: LibraryTrack): TrackerProject {
   const recovered = recoveredProjectForTrack(track)
-  const stored = localStorage.getItem(storageKey(track.id))
+  const stored = safeStorageGet(browserStorage(), storageKey(track.id))
   if (!stored) return recovered ?? createDraft(track)
   try {
     const saved = parseProject(stored)
@@ -60,6 +61,7 @@ function App() {
   const [message, setMessage] = useState('Ready')
   const [aboutOpen, setAboutOpen] = useState(false)
   const [updateReady, setUpdateReady] = useState(false)
+  const [storageHealthy, setStorageHealthy] = useState(() => browserStorage() !== null)
   const importRef = useRef<HTMLInputElement>(null)
   const audioRef = useRef<HTMLAudioElement>(null)
   const timerRef = useRef<number | null>(null)
@@ -152,7 +154,8 @@ function App() {
   }
 
   useEffect(() => {
-    localStorage.setItem(storageKey(selectedId), serializeProject(project))
+    const saved = safeStorageSet(browserStorage(), storageKey(selectedId), serializeProject(project))
+    setStorageHealthy((current) => current === saved ? current : saved)
   }, [project, selectedId])
 
   useEffect(() => () => stopEverything(), [stopEverything])
@@ -209,7 +212,8 @@ function App() {
     const keys = ['a', 'w', 's', 'e', 'd', 'f', 't', 'g', 'y', 'h', 'u', 'j', 'k']
     const handler = (event: KeyboardEvent) => {
       const target = event.target as HTMLElement
-      if (target.matches('input, select, textarea, button, audio')) return
+      const trackerCell = target.closest('.tracker-table tbody td button')
+      if (target.matches('input, select, textarea, audio') || (target.matches('button') && !trackerCell)) return
       if (event.code === 'Space') { event.preventDefault(); toggleTransport(); return }
       if (!editing) return
       if (event.key === 'Delete' || event.key === 'Backspace') {
@@ -231,7 +235,7 @@ function App() {
   }, [editing, octave, project.rows, selectedChannel, selectedRow, setNote, toggleTransport])
 
   const undo = () => {
-    const previous = undoStack.at(-1)
+    const previous = undoStack[undoStack.length - 1]
     if (!previous) return
     setRedoStack((stack) => [...stack, cloneProject(project)])
     setUndoStack((stack) => stack.slice(0, -1))
@@ -240,7 +244,7 @@ function App() {
   }
 
   const redo = () => {
-    const next = redoStack.at(-1)
+    const next = redoStack[redoStack.length - 1]
     if (!next) return
     setUndoStack((stack) => [...stack, cloneProject(project)])
     setRedoStack((stack) => stack.slice(0, -1))
@@ -280,7 +284,10 @@ function App() {
     if (!editing && audioRef.current) {
       if (audioRef.current.paused) {
         if (project.sourceSync && audioRef.current.currentTime < project.sourceSync.audioOffset) audioRef.current.currentTime = project.sourceSync.audioOffset
-        void audioRef.current.play()
+        void audioRef.current.play().catch(() => {
+          setReferencePlaying(false)
+          setMessage('This browser blocked source playback; use its audio controls or the original upload')
+        })
       } else {
         audioRef.current.pause()
       }
@@ -311,8 +318,9 @@ function App() {
   }
 
   const saveWorkspace = () => {
-    localStorage.setItem(storageKey(selectedId), serializeProject(project))
-    setMessage('Saved in this browser')
+    const saved = safeStorageSet(browserStorage(), storageKey(selectedId), serializeProject(project))
+    setStorageHealthy(saved)
+    setMessage(saved ? 'Saved in this browser' : 'Browser storage is blocked; export JSON to keep these edits')
   }
 
   const reset = () => {
@@ -387,6 +395,8 @@ function App() {
           </div>
         </section>
 
+        {!storageHealthy && <section className="storage-warning" role="status"><strong>Temporary browser session</strong><span>This browser blocked local storage. The editor still works, but export Chipvault JSON before closing the tab if you want to keep changes.</span></section>}
+
         {selectedTrack.externalVideoId ? (
           <BonusPlayer track={selectedTrack} />
         ) : <>
@@ -413,7 +423,7 @@ function App() {
             <button onClick={undo} disabled={!undoStack.length} title="Undo">↶</button>
             <button onClick={redo} disabled={!redoStack.length} title="Redo">↷</button>
             {editing && <button className="save-button" onClick={saveWorkspace}>Save</button>}
-            <span className={`save-state ${editedCount ? 'has-edits' : ''}`}><i /> {editing ? `${editedCount} user-edited cell${editedCount === 1 ? '' : 's'}` : 'source view'}</span>
+            <span className={`save-state ${editedCount ? 'has-edits' : ''} ${storageHealthy ? '' : 'temporary'}`}><i /> {editing ? (storageHealthy ? `${editedCount} user-edited cell${editedCount === 1 ? '' : 's'}` : 'temporary session') : 'source view'}</span>
           </div>
 
           <div className="editor-tabs">
@@ -550,7 +560,10 @@ function PianoRoll({ project, channelId, selectedRow, editing, onChannel, onSetN
 }) {
   const pitches = Array.from({ length: 36 }, (_, index) => midiToNote(83 - index))
   const notesByRow = new Map(project.cells[channelId].map((cell, row) => [row, cell.note]))
-  const editedRows = new Set(project.cells[channelId].flatMap((cell, row) => cell.edited ? [row] : []))
+  const editedRows = new Set(project.cells[channelId].reduce<number[]>((rows, cell, row) => {
+    if (cell.edited) rows.push(row)
+    return rows
+  }, []))
   return (
     <div className="piano-editor">
       <div className="piano-toolbar"><label>Editing<select value={channelId} onChange={(event) => onChannel(event.target.value as ChannelId)}>{channels.map((channel) => <option value={channel.id} key={channel.id}>{channel.name}</option>)}</select></label><span>Click to draw · click again to erase</span></div>
