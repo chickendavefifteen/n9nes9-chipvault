@@ -15,6 +15,7 @@ import {
 } from './lib/project'
 import { buildUpdateAction, BUILD_ID, fetchBuildManifest } from './lib/versioning'
 import { browserStorage, safeStorageGet, safeStorageSet } from './lib/reliability'
+import { cellKey, rectangularSelection, selectionBounds, type GridPoint, type GridSelection } from './lib/selection'
 import {
   createPlaybackSignal,
   isPlaybackSignal,
@@ -31,9 +32,10 @@ type ViewMode = 'tracker' | 'piano'
 type Filter = 'all' | 'original' | 'cover' | 'demo' | 'bonus'
 type PreviewMode = 'source' | 'chip'
 type ChipPurpose = 'preview' | 'fallback'
-type SaveStatus = 'saving' | 'saved' | 'temporary'
+type SaveStatus = 'dirty' | 'saved' | 'temporary'
 
 const engine = new ChipAudioEngine()
+const trackerChannelIds = channels.map((channel) => channel.id)
 const storageKey = (id: string) => `n9nes9-chipvault:${id}`
 const asset = (path: string) => `${import.meta.env.BASE_URL}${path}`
 
@@ -78,15 +80,21 @@ function App() {
   const [query, setQuery] = useState('')
   const [selectedChannel, setSelectedChannel] = useState<ChannelId>('pulse1')
   const [selectedRow, setSelectedRow] = useState(0)
+  const [cellSelection, setCellSelection] = useState<GridSelection>(() => ({
+    anchor: { channelId: 'pulse1', row: 0 },
+    focus: { channelId: 'pulse1', row: 0 },
+  }))
   const [octave, setOctave] = useState(4)
   const [playing, setPlaying] = useState(false)
   const [referenceStarting, setReferenceStarting] = useState(false)
   const [referencePlaying, setReferencePlaying] = useState(false)
   const [editing, setEditing] = useState(false)
-  const [previewMode, setPreviewMode] = useState<PreviewMode>(initialTrack.audio ? 'source' : 'chip')
+  const [previewMode, setPreviewMode] = useState<PreviewMode>(() => (
+    projectPreviewRow(project) !== null ? 'chip' : initialTrack.audio ? 'source' : 'chip'
+  ))
   const [chipPurpose, setChipPurpose] = useState<ChipPurpose | null>(null)
   const [lastEditedRow, setLastEditedRow] = useState<number | null>(() => projectPreviewRow(project))
-  const [playhead, setPlayhead] = useState(0)
+  const [playhead, setPlayhead] = useState(() => projectPreviewRow(project) ?? 0)
   const [muted, setMuted] = useState<Set<ChannelId>>(new Set())
   const [message, setMessage] = useState('Ready')
   const [aboutOpen, setAboutOpen] = useState(false)
@@ -106,12 +114,19 @@ function App() {
   const previewModeRef = useRef<PreviewMode>(previewMode)
   const chipStartRowRef = useRef(playhead)
   const storageHealthyRef = useRef(storageHealthy)
+  const selectionDraggingRef = useRef(false)
 
   const filtered = useMemo(() => library.filter((track) => {
     const matchesFilter = filter === 'all' || track.kind === filter
     const haystack = `${track.shortTitle} ${track.description} ${track.credit ?? ''}`.toLowerCase()
     return matchesFilter && haystack.includes(query.trim().toLowerCase())
   }), [filter, query])
+  const selectedTargets = useMemo(() => rectangularSelection(cellSelection, trackerChannelIds, project.rows), [cellSelection, project.rows])
+  const selectedCellKeys = useMemo(() => new Set(selectedTargets.map((point) => cellKey(point.channelId, point.row))), [selectedTargets])
+  const selectedBounds = useMemo(() => selectionBounds(selectedTargets), [selectedTargets])
+  const selectionSummary = selectedBounds
+    ? `${selectedTargets.length} cell${selectedTargets.length === 1 ? '' : 's'} selected · rows ${selectedBounds.firstRow.toString(16).padStart(2, '0').toUpperCase()}–${selectedBounds.lastRow.toString(16).padStart(2, '0').toUpperCase()}`
+    : 'No cells selected'
   const selectedCell = project.cells[selectedChannel][selectedRow]
   const editedCount = useMemo(() => channels.reduce((total, channel) => (
     total + project.cells[channel.id].filter((cell) => cell.edited).length
@@ -123,15 +138,15 @@ function App() {
     ? 'original recording'
     : playing
       ? 'edited chip preview'
-      : editing && previewMode === 'chip'
+      : previewMode === 'chip'
         ? 'edited chip preview'
         : selectedTrack.audio ? 'original recording' : 'edited chip preview'
   const editedStartLabel = lastEditedRow === null ? null : `${Math.floor(lastEditedRow / project.patternLength).toString(16).padStart(2, '0').toUpperCase()}:${(lastEditedRow % project.patternLength).toString(16).padStart(2, '0').toUpperCase()}`
   const savedTime = lastSavedAt === null ? null : new Date(lastSavedAt).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', second: '2-digit' })
   const saveText = saveStatus === 'temporary'
     ? 'Not saved · export to keep'
-    : saveStatus === 'saving'
-      ? 'Saving in this browser…'
+    : saveStatus === 'dirty'
+      ? `Unsaved changes · ${editedCount} edit${editedCount === 1 ? '' : 's'}`
       : `Saved in this browser${savedTime ? ` · ${savedTime}` : ''} · ${editedCount} edit${editedCount === 1 ? '' : 's'}`
 
   useEffect(() => {
@@ -142,7 +157,7 @@ function App() {
   }, [editing, playbackActive, previewMode, storageHealthy])
 
   const commit = useCallback((mutate: (draft: TrackerProject) => void) => {
-    setSaveStatus(storageHealthyRef.current ? 'saving' : 'temporary')
+    setSaveStatus('dirty')
     setProject((current) => {
       setUndoStack((stack) => [...stack.slice(-49), cloneProject(current)])
       setRedoStack([])
@@ -182,6 +197,94 @@ function App() {
     if (nextMessage) setMessage(nextMessage)
   }, [pauseReference, stopChip])
 
+  const beginCellSelection = useCallback((channelId: ChannelId, row: number, extend: boolean) => {
+    selectionDraggingRef.current = editingRef.current
+    setSelectedChannel(channelId)
+    setSelectedRow(row)
+    setCellSelection((current) => extend
+      ? { anchor: current.anchor, focus: { channelId, row } }
+      : { anchor: { channelId, row }, focus: { channelId, row } })
+  }, [])
+
+  const selectSingleCell = useCallback((channelId: ChannelId, row: number) => {
+    setSelectedChannel(channelId)
+    setSelectedRow(row)
+    setCellSelection({ anchor: { channelId, row }, focus: { channelId, row } })
+  }, [])
+
+  const extendCellSelection = useCallback((channelId: ChannelId, row: number) => {
+    if (!selectionDraggingRef.current || !editingRef.current) return
+    setSelectedChannel(channelId)
+    setSelectedRow(row)
+    setCellSelection((current) => ({ ...current, focus: { channelId, row } }))
+  }, [])
+
+  const endCellSelection = useCallback(() => {
+    selectionDraggingRef.current = false
+  }, [])
+
+  useEffect(() => {
+    const followPointer = (event: PointerEvent | MouseEvent) => {
+      if (!selectionDraggingRef.current || !editingRef.current) return
+      const element = document.elementFromPoint(event.clientX, event.clientY)?.closest<HTMLButtonElement>('button[data-grid-channel][data-grid-row]')
+      const channelId = element?.dataset.gridChannel as ChannelId | undefined
+      const row = Number(element?.dataset.gridRow)
+      if (!channelId || !trackerChannelIds.includes(channelId) || !Number.isInteger(row)) return
+      extendCellSelection(channelId, row)
+    }
+    window.addEventListener('pointermove', followPointer)
+    window.addEventListener('mousemove', followPointer)
+    window.addEventListener('pointerup', endCellSelection)
+    window.addEventListener('mouseup', endCellSelection)
+    window.addEventListener('pointercancel', endCellSelection)
+    return () => {
+      window.removeEventListener('pointermove', followPointer)
+      window.removeEventListener('mousemove', followPointer)
+      window.removeEventListener('pointerup', endCellSelection)
+      window.removeEventListener('mouseup', endCellSelection)
+      window.removeEventListener('pointercancel', endCellSelection)
+    }
+  }, [endCellSelection, extendCellSelection])
+
+  useEffect(() => {
+    if (saveStatus !== 'dirty') return
+    const warnOnClose = (event: BeforeUnloadEvent) => {
+      event.preventDefault()
+      event.returnValue = ''
+    }
+    window.addEventListener('beforeunload', warnOnClose)
+    return () => window.removeEventListener('beforeunload', warnOnClose)
+  }, [saveStatus])
+
+  const saveWorkspace = () => {
+    const saved = safeStorageSet(browserStorage(), storageKey(selectedId), serializeProject(project))
+    setStorageHealthy(saved)
+    storageHealthyRef.current = saved
+    if (!saved) {
+      setSaveStatus('temporary')
+      setMessage('This browser blocked local save · export JSON to keep these changes')
+      return
+    }
+
+    const savedEditRow = projectPreviewRow(project)
+    const mode: PreviewMode = savedEditRow !== null ? 'chip' : selectedTrack.audio ? 'source' : 'chip'
+    stopEverything()
+    editingRef.current = false
+    previewModeRef.current = mode
+    setEditing(false)
+    setPreviewMode(mode)
+    setSaveStatus('saved')
+    setLastSavedAt(Date.now())
+    if (savedEditRow !== null) {
+      chipStartRowRef.current = savedEditRow
+      setLastEditedRow(savedEditRow)
+      setPlayhead(savedEditRow)
+    }
+    setMessage(mode === 'chip'
+      ? 'Saved locally · Play now uses your edited pattern'
+      : 'Saved locally · Play mode ready')
+  }
+
   const armEditedPreview = useCallback((row: number, detail: string) => {
     previewModeRef.current = 'chip'
     chipStartRowRef.current = row
@@ -191,7 +294,7 @@ function App() {
     setPreviewMode('chip')
     setPlayhead(row)
     setLastEditedRow(row)
-    setMessage(`${detail} · Edited preview armed at ${order}:${patternRow}`)
+    setMessage(`${detail} · unsaved · Edited preview armed at ${order}:${patternRow}`)
   }, [project.patternLength, stopEverything])
 
   const commitPreviewEdit = useCallback((mutate: (draft: TrackerProject) => void, row: number, detail: string) => {
@@ -210,7 +313,7 @@ function App() {
 
   const syncReference = useCallback(() => {
     const audio = audioRef.current
-    if (!audio || (editingRef.current && previewModeRef.current === 'chip')) return
+    if (!audio || previewModeRef.current === 'chip') return
     setPlayhead(Math.floor(sourceRowPosition(audio.currentTime, project.sourceSync, project.tempo, project.rows)))
   }, [project.rows, project.sourceSync, project.tempo])
 
@@ -227,7 +330,7 @@ function App() {
     const rowDuration = 60 / project.tempo / 4
     const sessionTicks = selectedTrack.kind === 'bonus' ? Math.ceil(selectedTrack.duration / rowDuration) : Number.POSITIVE_INFINITY
     let elapsedTicks = 0
-    let row = purpose === 'preview' && editingRef.current ? chipStartRowRef.current : playhead
+    let row = purpose === 'preview' ? chipStartRowRef.current : playhead
     const tick = () => {
       if (elapsedTicks >= sessionTicks) {
         stopChip('Ten-minute bonus session finished')
@@ -311,8 +414,10 @@ function App() {
 
   const selectTrack = (track: LibraryTrack) => {
     if (track.id === selectedId) return
+    if (saveStatus === 'dirty' && !window.confirm('Discard the unsaved tracker changes and open another tune?')) return
     const nextProject = loadProject(track)
     const nextPreviewRow = projectPreviewRow(nextProject)
+    const nextMode: PreviewMode = nextPreviewRow !== null ? 'chip' : track.audio ? 'source' : 'chip'
     stopEverything()
     setSelectedId(track.id)
     setProject(nextProject)
@@ -321,25 +426,19 @@ function App() {
     setPlayhead(nextPreviewRow ?? 0)
     setSelectedRow(0)
     setSelectedChannel('pulse1')
+    setCellSelection({ anchor: { channelId: 'pulse1', row: 0 }, focus: { channelId: 'pulse1', row: 0 } })
     setView('tracker')
     setMuted(new Set())
     setEditing(false)
-    previewModeRef.current = track.audio ? 'source' : 'chip'
+    previewModeRef.current = nextMode
     chipStartRowRef.current = nextPreviewRow ?? 0
-    setPreviewMode(track.audio ? 'source' : 'chip')
+    setPreviewMode(nextMode)
     setLastEditedRow(nextPreviewRow)
-    setSaveStatus(browserStorage() ? 'saving' : 'temporary')
+    setSaveStatus(browserStorage() ? 'saved' : 'temporary')
     setLastSavedAt(null)
     window.history.replaceState(null, '', `#${track.slug}`)
     setMessage(`Loaded ${track.shortTitle}`)
   }
-
-  useEffect(() => {
-    const saved = safeStorageSet(browserStorage(), storageKey(selectedId), serializeProject(project))
-    setStorageHealthy(saved)
-    setSaveStatus(saved ? 'saved' : 'temporary')
-    if (saved) setLastSavedAt(Date.now())
-  }, [project, selectedId])
 
   useEffect(() => () => stopEverything(), [stopEverything])
 
@@ -431,16 +530,31 @@ function App() {
     }
   }, [stopEverything, syncReference])
 
-  const setNote = useCallback((channelId: ChannelId, row: number, note: string | null) => {
-    if (!editing) return
-    const previous = project.cells[channelId][row]
+  const setNotes = useCallback((targets: GridPoint[], note: string | null) => {
+    if (!editing || !targets.length) return
+    const firstRow = Math.min(...targets.map((target) => target.row))
+    const auditionTarget = targets[targets.length - 1]
+    const previous = project.cells[auditionTarget.channelId][auditionTarget.row]
     commitPreviewEdit((draft) => {
-      draft.cells[channelId][row].note = note
-      draft.cells[channelId][row].edited = true
-    }, row, note ? `${note} entered and autosaving` : 'Note cleared and autosaving')
-    setSelectedChannel(channelId)
-    setSelectedRow(row)
-    const channel = channels.find((candidate) => candidate.id === channelId)
+      targets.forEach((target) => {
+        const cell = draft.cells[target.channelId][target.row]
+        cell.note = note
+        if (note) {
+          cell.instrument ??= target.channelId.startsWith('vrc6') ? 1 : 0
+          cell.volume ??= 15
+        } else {
+          cell.instrument = null
+          cell.volume = null
+          cell.effect = ''
+        }
+        cell.edited = true
+      })
+    }, firstRow, note
+      ? `${note} applied to ${targets.length} cell${targets.length === 1 ? '' : 's'}`
+      : `${targets.length} selected cell${targets.length === 1 ? '' : 's'} cleared`)
+    setSelectedChannel(auditionTarget.channelId)
+    setSelectedRow(auditionTarget.row)
+    const channel = channels.find((candidate) => candidate.id === auditionTarget.channelId)
     if (note && channel && !playbackActiveRef.current) {
       void engine.unlock().then((unlocked) => {
         if (!unlocked || playbackActiveRef.current) return
@@ -448,6 +562,26 @@ function App() {
       })
     }
   }, [commitPreviewEdit, editing, project.cells])
+
+  const setNote = useCallback((channelId: ChannelId, row: number, note: string | null) => {
+    selectSingleCell(channelId, row)
+    setNotes([{ channelId, row }], note)
+  }, [selectSingleCell, setNotes])
+
+  const setSelectionNote = useCallback((note: string | null) => {
+    setNotes(selectedTargets, note)
+  }, [selectedTargets, setNotes])
+
+  const editSelection = useCallback((mutate: (cell: TrackerProject['cells'][ChannelId][number]) => void, detail: string) => {
+    if (!editing || !selectedTargets.length || !selectedBounds) return
+    commitPreviewEdit((draft) => {
+      selectedTargets.forEach((target) => {
+        const cell = draft.cells[target.channelId][target.row]
+        mutate(cell)
+        cell.edited = true
+      })
+    }, selectedBounds.firstRow, `${detail} on ${selectedTargets.length} cell${selectedTargets.length === 1 ? '' : 's'}`)
+  }, [commitPreviewEdit, editing, selectedBounds, selectedTargets])
 
   useEffect(() => {
     const keys = ['a', 'w', 's', 'e', 'd', 'f', 't', 'g', 'y', 'h', 'u', 'j', 'k']
@@ -459,7 +593,7 @@ function App() {
       if (!editing) return
       if (event.key === 'Delete' || event.key === 'Backspace') {
         event.preventDefault()
-        setNote(selectedChannel, selectedRow, null)
+        setSelectionNote(null)
         return
       }
       if (event.key.toLowerCase() === 'z') { setOctave((value) => Math.max(1, value - 1)); return }
@@ -467,20 +601,20 @@ function App() {
       const semitone = keys.indexOf(event.key.toLowerCase())
       if (semitone >= 0) {
         event.preventDefault()
-        setNote(selectedChannel, selectedRow, midiToNote((octave + 1) * 12 + semitone))
-        setSelectedRow((row) => Math.min(project.rows - 1, row + 1))
+        setSelectionNote(midiToNote((octave + 1) * 12 + semitone))
+        if (selectedTargets.length === 1) selectSingleCell(selectedChannel, Math.min(project.rows - 1, selectedRow + 1))
       }
     }
     window.addEventListener('keydown', handler)
     return () => window.removeEventListener('keydown', handler)
-  }, [editing, octave, project.rows, selectedChannel, selectedRow, setNote, toggleTransport])
+  }, [editing, octave, project.rows, selectSingleCell, selectedChannel, selectedRow, selectedTargets.length, setSelectionNote, toggleTransport])
 
   const undo = () => {
     const previous = undoStack[undoStack.length - 1]
     if (!previous) return
     setRedoStack((stack) => [...stack, cloneProject(project)])
     setUndoStack((stack) => stack.slice(0, -1))
-    setSaveStatus(storageHealthyRef.current ? 'saving' : 'temporary')
+    setSaveStatus('dirty')
     setProject(previous)
     armEditedPreview(selectedRow, 'Undo applied')
   }
@@ -490,7 +624,7 @@ function App() {
     if (!next) return
     setUndoStack((stack) => [...stack, cloneProject(project)])
     setRedoStack((stack) => stack.slice(0, -1))
-    setSaveStatus(storageHealthyRef.current ? 'saving' : 'temporary')
+    setSaveStatus('dirty')
     setProject(next)
     armEditedPreview(selectedRow, 'Redo applied')
   }
@@ -504,7 +638,7 @@ function App() {
       const shippedRevision = recoveredProjectForTrack(selectedTrack)?.contentRevision ?? 0
       setUndoStack((stack) => [...stack, cloneProject(project)])
       setProject({ ...imported, sourceId: selectedTrack.id, contentRevision: Math.max(imported.contentRevision, shippedRevision + 1), previewStartRow: 0 })
-      setSaveStatus(storageHealthyRef.current ? 'saving' : 'temporary')
+      setSaveStatus('dirty')
       armEditedPreview(0, `Imported ${file.name}`)
     } catch (error) {
       setMessage(error instanceof Error ? error.message : 'Import failed')
@@ -549,7 +683,7 @@ function App() {
     clearSourceWatchdog()
     setReferenceStarting(false)
     setReferencePlaying(false)
-    if (shouldRestartSource(project.loop, document.hidden) && (!editing || previewMode === 'source')) {
+    if (shouldRestartSource(project.loop, document.hidden) && previewMode === 'source') {
       beginSourcePlayback(true)
     } else {
       sourceAttemptRef.current += 1
@@ -567,12 +701,16 @@ function App() {
       stopEverything('Paused')
       return
     }
-    if ((!editing || previewMode === 'source') && audioRef.current) beginSourcePlayback()
+    if (previewMode === 'source' && audioRef.current) beginSourcePlayback()
     else startChip(selectedTrack.kind === 'bonus' ? 'Playing editable chiptune arrangement' : 'Playing edited chip preview')
   }
 
   const setEditMode = (next: boolean) => {
     if (next === editing) return
+    if (!next && saveStatus === 'dirty') {
+      setMessage('Unsaved changes · use Save & Play before leaving Edit')
+      return
+    }
     stopEverything()
     setEditing(next)
     if (next) {
@@ -589,9 +727,11 @@ function App() {
         ? 'Editing · original recording selected · the first change will arm Edited preview'
         : `Editing saved chiptune${savedEditRow === null ? '' : ' · Edited preview restored at the last changed row'}`)
     } else {
-      previewModeRef.current = selectedTrack.audio ? 'source' : 'chip'
-      setPreviewMode(selectedTrack.audio ? 'source' : 'chip')
-      setMessage('Viewing recovered source')
+      const savedEditRow = projectPreviewRow(project)
+      const mode: PreviewMode = savedEditRow !== null ? 'chip' : selectedTrack.audio ? 'source' : 'chip'
+      previewModeRef.current = mode
+      setPreviewMode(mode)
+      setMessage(mode === 'chip' ? 'Play mode · saved edited pattern selected' : 'Play mode · original recording selected')
     }
   }
 
@@ -614,6 +754,9 @@ function App() {
     if (next === view) return
     stopEverything()
     setView(next)
+    if (next === 'tracker') {
+      setCellSelection({ anchor: { channelId: selectedChannel, row: selectedRow }, focus: { channelId: selectedChannel, row: selectedRow } })
+    }
     setMessage(next === 'tracker' ? 'Tracker grid ready' : 'Piano roll ready')
   }
 
@@ -628,7 +771,7 @@ function App() {
   const reset = () => {
     if (!window.confirm(`Reset local edits for “${selectedTrack.shortTitle}”?`)) return
     setUndoStack((stack) => [...stack, cloneProject(project)])
-    setSaveStatus(storageHealthyRef.current ? 'saving' : 'temporary')
+    setSaveStatus('dirty')
     setProject(recoveredProjectForTrack(selectedTrack) ?? createDraft(selectedTrack))
     armEditedPreview(0, 'Restored the clean recovery baseline')
   }
@@ -686,8 +829,8 @@ function App() {
             <p>{selectedTrack.description}</p>
             {selectedTrack.credit && <p className="credit">{selectedTrack.credit}</p>}
             <div className="workspace-mode" aria-label="Workspace mode">
-              <button className={!editing ? 'active' : ''} onClick={() => setEditMode(false)}><span>View</span><small>source animation</small></button>
-              <button className={editing ? 'active' : ''} onClick={() => setEditMode(true)}><span>Edit</span><small>browser workspace</small></button>
+              <button className={!editing ? 'active' : ''} onClick={() => setEditMode(false)}><span>Play</span><small>saved pattern</small></button>
+              <button className={editing ? 'active' : ''} onClick={() => setEditMode(true)}><span>Edit</span><small>drag + draw</small></button>
               <details className="export-menu mode-export"><summary>Export</summary><div><button onClick={exportNative}>Chipvault JSON</button><button onClick={exportFami}>FamiTracker TXT</button>{selectedTrack.audio && <a href={asset(selectedTrack.audio)} download={`${selectedTrack.slug}.m4a`}>Source audio M4A</a>}<button onClick={() => importRef.current?.click()}>Import project</button>{editing && <button className="danger-action" onClick={reset}>Reset edits</button>}</div></details>
             </div>
             {selectedTrack.audio && <div className="source-player">
@@ -709,7 +852,7 @@ function App() {
           ) : project.recoveryStatus === 'arranged-cover' ? (
             <div><strong>Editable VRC6-style chiptune arrangement · ten-minute session</strong><p>The recognizable sax riff, harmony, bass, and drums are synthesized by the browser tracker and loop as editable pattern data.</p></div>
           ) : (
-            <div><strong>Recovery draft — original module not yet found</strong><p>The recording is authentic. Pattern data starts blank until transcribed or an original FTM is imported. Edits are autosaved only in this browser.</p></div>
+            <div><strong>Recovery draft — original module not yet found</strong><p>The recording is authentic. Pattern data starts blank until transcribed or an original FTM is imported. Save keeps edits locally in this browser; export is optional.</p></div>
           )}
           <button onClick={() => setAboutOpen(true)}>Why?</button>
         </section>
@@ -720,24 +863,24 @@ function App() {
               <button className="play-button" onClick={toggleTransport} aria-label={playbackActive ? `Pause ${playbackName}` : `Play ${playbackName}`} title={playbackActive ? `Pause ${playbackName}` : `Play ${playbackName}`}>{playbackActive ? '■' : '▶'}</button>
               <button onClick={returnToStart} aria-label="Return to first row">↤</button>
             </div>
-            <label>BPM<input type="number" min="32" max="300" disabled={!editing} value={project.tempo} onChange={(event) => commitPreviewEdit((draft) => { draft.tempo = Number(event.target.value) }, selectedRow, 'Tempo changed and autosaving')} /></label>
-            <label>Speed<input type="number" min="1" max="31" disabled={!editing} value={project.speed} onChange={(event) => commitPreviewEdit((draft) => { draft.speed = Number(event.target.value) }, selectedRow, 'Speed changed and autosaving')} /></label>
-            <label className="loop-control"><input type="checkbox" disabled={!editing} checked={project.loop} onChange={(event) => commitPreviewEdit((draft) => { draft.loop = event.target.checked }, selectedRow, 'Loop setting changed and autosaving')} /> Loop</label>
+            <label>BPM<input type="number" min="32" max="300" disabled={!editing} value={project.tempo} onChange={(event) => commitPreviewEdit((draft) => { draft.tempo = Number(event.target.value) }, selectedRow, 'Tempo changed')} /></label>
+            <label>Speed<input type="number" min="1" max="31" disabled={!editing} value={project.speed} onChange={(event) => commitPreviewEdit((draft) => { draft.speed = Number(event.target.value) }, selectedRow, 'Speed changed')} /></label>
+            <label className="loop-control"><input type="checkbox" disabled={!editing} checked={project.loop} onChange={(event) => commitPreviewEdit((draft) => { draft.loop = event.target.checked }, selectedRow, 'Loop setting changed')} /> Loop</label>
             <div className="transport-spacer" />
             <button onClick={undo} disabled={!undoStack.length} title="Undo">↶</button>
             <button onClick={redo} disabled={!redoStack.length} title="Redo">↷</button>
-            <span className={`save-state ${editedCount ? 'has-edits' : ''} ${saveStatus}`} role="status" aria-live="polite" title="Projects are stored only in this browser on this device. Export JSON for a portable backup."><i /> {editing ? saveText : 'source view'}</span>
+            <span className={`save-state ${editedCount ? 'has-edits' : ''} ${saveStatus}`} role="status" aria-live="polite" title="Projects are stored only in this browser on this device. Export is optional."><i /> {saveText}</span>
           </div>
 
-          {editing && <div className="edit-session-bar">
+          {(editing || editedCount > 0) && <div className={`edit-session-bar ${editing ? '' : 'play-session'}`}>
             <div className="preview-switch" role="group" aria-label="Playback preview">
               <button className={previewMode === 'source' ? 'active' : ''} disabled={!selectedTrack.audio} onClick={() => choosePreview('source')}><span>Original mix</span><small>{selectedTrack.audio ? 'authentic recording' : 'unavailable'}</small></button>
               <button className={previewMode === 'chip' ? 'active' : ''} onClick={() => choosePreview('chip')}><span>Edited preview</span><small>{editedStartLabel ? `next Play · ${editedStartLabel}` : 'browser chiptune'}</small></button>
             </div>
             <p>{previewMode === 'source'
-              ? <><strong>Authentic sound</strong><span>Your edits stay visible and each entered note is auditioned. Switch to Edited preview to hear the whole editable draft.</span></>
-              : <><strong>{editedStartLabel ? `Edited preview armed · ${editedStartLabel}` : 'Approximate edited sound'}</strong><span>{editedStartLabel ? `Next Play starts on the changed row and uses the autosaved editable pattern.` : 'This synthesizes the reconstructed notes, so it will not match the original recording exactly.'}</span></>}</p>
-            <div className={`edit-save-card ${saveStatus}`} role="status" aria-live="polite"><i /><span><strong>{saveStatus === 'temporary' ? 'Not saved' : saveStatus === 'saving' ? 'Saving…' : 'Saved locally'}</strong><small>{saveStatus === 'temporary' ? 'Export JSON before closing' : savedTime ? `This browser · ${savedTime} · ${editedCount} edit${editedCount === 1 ? '' : 's'}` : 'Autosave is ready'}</small></span></div>
+              ? <><strong>Original recording</strong><span>Your local edits stay on the grid. Choose Edited preview to hear the saved browser pattern.</span></>
+              : <><strong>{editedStartLabel ? `Edited preview · ${editedStartLabel}` : 'Approximate edited sound'}</strong><span>{editing && saveStatus === 'dirty' ? 'You are hearing the working copy. Save before returning to Play.' : 'Play uses the pattern saved locally in this browser.'}</span></>}</p>
+            {editing ? <div className={`edit-save-card ${saveStatus}`} role="status" aria-live="polite"><i /><span><strong>{saveStatus === 'temporary' ? 'Save blocked' : saveStatus === 'dirty' ? 'Unsaved changes' : 'Saved locally'}</strong><small>{saveStatus === 'temporary' ? 'Export JSON before closing' : saveStatus === 'dirty' ? `${editedCount} edit${editedCount === 1 ? '' : 's'} · not written yet` : savedTime ? `This browser · ${savedTime}` : 'No unsaved changes'}</small></span><button className="save-button" onClick={saveWorkspace}>Save &amp; go to Play</button></div> : <div className="play-mode-chip"><strong>Local project</strong><small>{previewMode === 'chip' ? 'edited pattern active' : 'original mix active'}</small></div>}
           </div>}
 
           <div className="editor-tabs">
@@ -749,24 +892,24 @@ function App() {
           </div>
 
           {view === 'tracker' ? (
-            <TrackerGrid project={project} playhead={playhead} referenceAudioRef={audioRef} referenceActive={referenceActive} chipPlaying={playing} selectedChannel={selectedChannel} selectedRow={selectedRow} muted={muted} editing={editing} onMute={(id) => setMuted((current) => { const next = new Set(current); next.has(id) ? next.delete(id) : next.add(id); return next })} onSelect={(id, row) => { setSelectedChannel(id); setSelectedRow(row) }} onClear={(id, row) => setNote(id, row, null)} />
+            <TrackerGrid project={project} playhead={playhead} referenceAudioRef={audioRef} referenceActive={referenceActive} chipPlaying={playing} selectedChannel={selectedChannel} selectedRow={selectedRow} selectedCellKeys={selectedCellKeys} muted={muted} editing={editing} onMute={(id) => setMuted((current) => { const next = new Set(current); next.has(id) ? next.delete(id) : next.add(id); return next })} onSelectionStart={beginCellSelection} onSelectionMove={extendCellSelection} onSelectionEnd={endCellSelection} onClearSelection={() => setSelectionNote(null)} />
           ) : (
             <PianoRoll project={project} channelId={selectedChannel} selectedRow={selectedRow} editing={editing} onChannel={setSelectedChannel} onSetNote={setNote} />
           )}
 
           <div className={`entry-strip ${editing ? '' : 'viewing'}`}>
-            <div><span className="eyebrow">Selected cell</span><strong>{channels.find((channel) => channel.id === selectedChannel)?.name} · row {selectedRow.toString(16).padStart(2, '0').toUpperCase()}</strong></div>
+            <div><span className="eyebrow">Grid selection</span><strong>{editing ? selectionSummary : `${channels.find((channel) => channel.id === selectedChannel)?.name} · row ${selectedRow.toString(16).padStart(2, '0').toUpperCase()}`}</strong></div>
             {editing ? <><div className="note-keys" aria-label="Quick note entry">
               {Array.from({ length: 12 }, (_, index) => midiToNote((octave + 1) * 12 + index)).map((note) => (
-                <button key={note} className={note.includes('#') ? 'sharp' : ''} onClick={() => setNote(selectedChannel, selectedRow, note)}>{note}</button>
+                <button key={note} className={note.includes('#') ? 'sharp' : ''} onClick={() => setSelectionNote(note)} title={`Fill ${selectedTargets.length} selected cell${selectedTargets.length === 1 ? '' : 's'} with ${note}`}>{note}</button>
               ))}
-              <button className="clear-note" onClick={() => setNote(selectedChannel, selectedRow, null)}>clear</button>
+              <button className="clear-note" onClick={() => setSelectionNote(null)}>Delete selected</button>
             </div>
             <div className="cell-inspector">
-              <label>Volume <input type="range" min="0" max="15" value={selectedCell.volume ?? 15} onChange={(event) => commitPreviewEdit((draft) => { const cell = draft.cells[selectedChannel][selectedRow]; cell.volume = Number(event.target.value); cell.edited = true }, selectedRow, 'Volume changed and autosaving')} /><output>{(selectedCell.volume ?? 15).toString(16).toUpperCase()}</output></label>
-              <label>Effect <input aria-label="Effect command" value={selectedCell.effect} maxLength={3} placeholder="0xy" onChange={(event) => { const value = event.target.value.toUpperCase().replace(/[^0-9A-FP-Z]/g, '').slice(0, 3); commitPreviewEdit((draft) => { const cell = draft.cells[selectedChannel][selectedRow]; cell.effect = value; cell.edited = true }, selectedRow, 'Effect changed and autosaving') }} /></label>
+              <label>Volume <input type="range" min="0" max="15" value={selectedCell.volume ?? 15} onChange={(event) => editSelection((cell) => { cell.volume = Number(event.target.value) }, 'Volume changed')} /><output>{(selectedCell.volume ?? 15).toString(16).toUpperCase()}</output></label>
+              <label>Effect <input aria-label="Effect command" value={selectedCell.effect} maxLength={3} placeholder="0xy" onChange={(event) => { const value = event.target.value.toUpperCase().replace(/[^0-9A-FP-Z]/g, '').slice(0, 3); editSelection((cell) => { cell.effect = value }, 'Effect changed') }} /></label>
             </div>
-            <p><kbd>A–K</kbd> enter notes · <kbd>Z/X</kbd> octave · <kbd>Del</kbd> clear · <kbd>Space</kbd> play</p></> : <div className="view-mode-copy"><strong>Fixed playhead · moving pattern</strong><span>Press Play to follow the recovered grid in time with the original recording.</span></div>}
+            <p><kbd>Drag</kbd> select a rectangle · <kbd>A–K</kbd> fill notes · <kbd>Del</kbd> delete selected · <kbd>Z/X</kbd> octave · <kbd>Space</kbd> play</p></> : <div className="view-mode-copy"><strong>Fixed playhead · moving pattern</strong><span>Press Play to follow the saved edited grid or choose the original recording above.</span></div>}
           </div>
         </section>
         <input ref={importRef} type="file" accept=".json,.txt" hidden onChange={(event) => { const file = event.target.files?.[0]; if (file) void onImport(file); event.target.value = '' }} />
@@ -778,7 +921,7 @@ function App() {
   )
 }
 
-function TrackerGrid({ project, playhead, referenceAudioRef, referenceActive, chipPlaying, selectedChannel, selectedRow, muted, editing, onMute, onSelect, onClear }: {
+function TrackerGrid({ project, playhead, referenceAudioRef, referenceActive, chipPlaying, selectedChannel, selectedRow, selectedCellKeys, muted, editing, onMute, onSelectionStart, onSelectionMove, onSelectionEnd, onClearSelection }: {
   project: TrackerProject
   playhead: number
   referenceAudioRef: React.RefObject<HTMLAudioElement | null>
@@ -786,11 +929,14 @@ function TrackerGrid({ project, playhead, referenceAudioRef, referenceActive, ch
   chipPlaying: boolean
   selectedChannel: ChannelId
   selectedRow: number
+  selectedCellKeys: Set<string>
   muted: Set<ChannelId>
   editing: boolean
   onMute: (id: ChannelId) => void
-  onSelect: (id: ChannelId, row: number) => void
-  onClear: (id: ChannelId, row: number) => void
+  onSelectionStart: (id: ChannelId, row: number, extend: boolean) => void
+  onSelectionMove: (id: ChannelId, row: number) => void
+  onSelectionEnd: () => void
+  onClearSelection: () => void
 }) {
   const scrollRef = useRef<HTMLDivElement>(null)
   const firstRowRef = useRef<HTMLTableRowElement>(null)
@@ -846,10 +992,11 @@ function TrackerGrid({ project, playhead, referenceAudioRef, referenceActive, ch
             {channels.map((channel) => {
               const cell = project.cells[channel.id][row]
               const selected = channel.id === selectedChannel && row === selectedRow
+              const rangeSelected = selectedCellKeys.has(cellKey(channel.id, row))
               const instrument = cell.note && cell.instrument !== null ? cell.instrument.toString(16).padStart(2, '0').toUpperCase() : '··'
               const volume = cell.note && cell.volume !== null ? cell.volume.toString(16).toUpperCase() : '·'
               const effect = cell.effect || '···'
-              return <td key={channel.id} style={{ '--channel': channel.color } as React.CSSProperties}><button aria-label={`${channel.name}, row ${row}${cell.edited ? ', user edited' : ''}`} className={`${selected ? 'selected-cell' : ''} ${cell.edited ? 'user-edited' : ''}`} onClick={() => onSelect(channel.id, row)} onDoubleClick={() => { if (editing) onClear(channel.id, row) }} onContextMenu={(event) => { if (editing) { event.preventDefault(); onClear(channel.id, row) } }}>
+              return <td key={channel.id} style={{ '--channel': channel.color } as React.CSSProperties}><button data-grid-channel={channel.id} data-grid-row={row} aria-label={`${channel.name}, row ${row}${rangeSelected ? ', selected' : ''}${cell.edited ? ', user edited' : ''}`} aria-pressed={rangeSelected} className={`${selected ? 'selected-cell' : ''} ${rangeSelected ? 'range-selected' : ''} ${cell.edited ? 'user-edited' : ''}`} onPointerDown={(event) => { if (event.button !== 0) return; event.preventDefault(); onSelectionStart(channel.id, row, event.shiftKey) }} onPointerOver={() => { if (editing) onSelectionMove(channel.id, row) }} onPointerUp={onSelectionEnd} onDoubleClick={(event) => { if (editing && rangeSelected) { event.preventDefault(); onClearSelection() } }} onContextMenu={(event) => { if (editing && rangeSelected) { event.preventDefault(); onClearSelection() } }}>
                 <b className={`note-token ${cell.note ? '' : 'empty-token'}`}>{cell.note ?? '···'}</b>
                 <span className="cell-fields"><i className={`instrument-token ${instrument === '··' ? 'empty-token' : ''}`}>{instrument}</i><i className={`volume-token ${volume === '·' ? 'empty-token' : ''}`}>{volume}</i><i className={`effect-token ${effect === '···' ? 'empty-token' : ''}`}>{effect}</i></span>
                 {cell.edited && <em className="edit-marker">EDIT</em>}

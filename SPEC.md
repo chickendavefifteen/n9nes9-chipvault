@@ -23,13 +23,13 @@ A static, offline-capable archive and modern browser tracker for the music uploa
 - R2: Exclude the 2 tutorials from the music library while documenting them in the inventory.
 - R3: Provide source-recording playback and one-click download.
 - R4: Provide editable projects with NES + VRC6 channels, tempo/speed controls, per-channel mute, tracker rows, and a piano-roll editing mode.
-- R5: Autosave edits locally and support undo/redo, project reset, JSON import/export, and shareable project files.
+- R5: Keep edits in a clearly marked working copy, save them locally only when the operator clicks Save, and support undo/redo, project reset, JSON import/export, and shareable project files.
 - R6: Export standards-compliant FamiTracker 0.4.6 text modules importable by FamiTracker and FamiStudio.
 - R7: Never represent audio-derived or empty recovery drafts as recovered original modules.
 - R8: Build and deploy as a static GitHub Pages site with no backend, account, analytics, or tracking.
 - R9: Work well with keyboard, mouse, touch, reduced motion, and narrow screens.
 - R10: During recovered source playback, keep a fixed centre playhead while pattern rows move continuously past it at the source recording's row rate.
-- R11: Present View, Edit, and Export as the three obvious workspace actions; entering View or Edit must never trigger a download.
+- R11: Present Play, Edit, and Export as the three obvious workspace actions; entering Play or Edit must never trigger a download.
 - R12: Use a restrained animated neon-sunset background and compact layout without reducing tracker contrast, legibility, or interaction speed.
 - R13: Match the recorded FamiTracker grid at token level: bright white notes, cobalt instruments, violet volume/effect data, and a blue-violet active row.
 - R14: Mark every browser-authored cell edit clearly and persist that provenance in native Chipvault projects without leaking it into FamiTracker text exports.
@@ -48,9 +48,11 @@ A static, offline-capable archive and modern browser tracker for the music uploa
 - R27: Every historical hashed entrypoint observed in deployed or still-open tabs must remain resolvable. Cache-safe deployment aliases historical JS/CSS names to the newly tested bundle so stale HTML cannot revive obsolete playback code.
 - R28: Because GitHub Pages forces a ten-minute document cache, every top-level navigation must immediately replace itself with a unique `fresh` query request, then remove only that token from the visible URL without another navigation. Reloading, revisiting, or opening an old bookmark must therefore obtain a fresh HTML document.
 - R29: Selecting any of the 18 library entries must load a populated editable pattern with visible note keys. The 16 recordings without frame recovery use reproducible dominant-pitch/onset analysis of the preserved mix and must not be described as exact original modules.
-- R30: Switching tracks must upgrade any older autosaved blank baseline when the shipped content revision is newer, without overwriting newer user edits.
-- R31: Edit mode must separate the authentic source recording from the approximate editable chip preview, audition entered notes, autosave every change immediately, and show an explicit browser-local saving/saved state with timestamp and edit count. A baseline upgrade must merge, not discard, cells already marked as user edits.
+- R30: Switching tracks must upgrade any older locally saved blank baseline when the shipped content revision is newer, without overwriting newer user edits.
+- R31: Edit mode must separate the authentic source recording from the approximate editable chip preview, audition entered notes, show an explicit dirty working-copy state, and save to browser-local storage only through the visible Save action. A baseline upgrade must merge, not discard, cells already marked as user edits.
 - R32: Any sound-affecting edit must automatically arm Edited preview for the next Play, place its playhead on the changed row, stop an incompatible source transport, and visibly identify that start row. Original mix remains available only as an explicit A/B selection after the edit.
+- R33: Saving must return to Play mode with the saved edited pattern selected. Play and reload must use that locally saved pattern until the operator explicitly selects Original mix or resets it; export remains optional.
+- R34: In the tracker, a mouse drag must select an inclusive rectangular range across rows and channels. Note entry, volume/effect changes, Delete/Backspace, and the visible Delete selected action must apply to the whole range as one undoable edit.
 
 ## Acceptance checks
 
@@ -63,7 +65,7 @@ A static, offline-capable archive and modern browser tracker for the music uploa
 - C7: A scrub finds no secrets, credentials, cookies, or private personal data in tracked files.
 - C8: A browser playback check samples the tracker scroll position multiple times and proves continuous movement while the page scroll position stays fixed.
 - C9: The centre playhead remains at a stable viewport coordinate while its order/row label advances with the recording.
-- C10: Desktop and narrow-screen browser checks expose unique View, Edit, and Export controls without page-level horizontal overflow.
+- C10: Desktop and narrow-screen browser checks expose unique Play, Edit, and Export controls without page-level horizontal overflow.
 - C11: `prefers-reduced-motion` disables decorative sunset/grid motion and smooth tracker scrolling.
 - C12: Browser tests prove note, instrument, volume, and effect tokens have distinct high-contrast colors and edited cells retain an explicit user-edit marker.
 - C13: Unit and browser tests prove track/mode switching stops orphaned playback, hidden-tab recovery leaves animation coherent, and the build manifest requests a reload only for a genuinely newer build.
@@ -83,6 +85,8 @@ A static, offline-capable archive and modern browser tracker for the music uploa
 - C27: Repeated root reloads prove the navigation bootstrap requests a new `fresh` URL on every load, cleans the visible URL, retains the selected hash, and boots the current build with no redirect loop.
 - C28: Browser tests prove an edited note is visibly marked, reports a completed browser-local save, survives a reload and a track round trip, and can be heard separately through the labelled edited-chip preview while the labelled original-mix preview remains authentic.
 - C29: Browser tests begin in Original mix, edit a known cell to a different pitch, prove the active preview and Play label switch automatically, prove playback begins on that cell and advances under `chip-preview`, then explicitly switch back to Original mix and prove source playback remains available.
+- C30: Browser tests drag across a two-channel by three-row rectangle, prove six cells are selected, fill all six with one note, delete all six, undo the batch once, and retain one visible dirty state throughout the unsaved working copy.
+- C31: Browser tests save the edited working copy, prove Edit closes into Play with Edited preview active, play the changed sound and moving rows, reload, and prove the saved cell values and Edited preview selection persist without invoking Export.
 
 ## Out of scope for this recovery pass
 
