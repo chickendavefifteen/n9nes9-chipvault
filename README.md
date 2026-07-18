@@ -28,6 +28,8 @@ npm test
 npm run build
 ```
 
+The published site is served from the generated `gh-pages` branch. The editable source remains on `main`.
+
 ## Content inventory
 
 - 9 original tracks
