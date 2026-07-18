@@ -1,0 +1,52 @@
+# N9NES9 Chipvault specification
+
+## Overview
+
+A static, offline-capable archive and modern browser tracker for the music uploads on the N9NES9 YouTube channel. The site preserves the source recordings, clearly distinguishes original work from covers and tutorials, and provides an honest recovery workspace rather than pretending compressed audio contains the lost FamiTracker project data.
+
+## Observed facts
+
+- The channel exposes 19 videos: 17 music/demo uploads and 2 tutorials.
+- The uploads date from 2012 and were made in FamiTracker; many use VRC6.
+- The descriptions contain one historical MediaFire FTM link. No live source module has yet been recovered.
+- YouTube audio is a mixed render. It does not contain the original per-channel notes, instruments, effects, frames, or pattern order.
+
+## Assumptions
+
+- The operator owns the channel recordings and authorizes their archival download and publication.
+- Covers should retain their original-composer credits and be labelled as covers.
+- GitHub Pages may be public under the currently authenticated GitHub account.
+
+## Requirements
+
+- R1: Archive all 17 music/demo recordings locally with title, date, kind, credits, YouTube ID, and source URL.
+- R2: Exclude the 2 tutorials from the music library while documenting them in the inventory.
+- R3: Provide source-recording playback and one-click download.
+- R4: Provide editable projects with NES + VRC6 channels, tempo/speed controls, per-channel mute, tracker rows, and a piano-roll editing mode.
+- R5: Autosave edits locally and support undo/redo, project reset, JSON import/export, and shareable project files.
+- R6: Export standards-compliant FamiTracker 0.4.6 text modules importable by FamiTracker and FamiStudio.
+- R7: Never represent audio-derived or empty recovery drafts as recovered original modules.
+- R8: Build and deploy as a static GitHub Pages site with no backend, account, analytics, or tracking.
+- R9: Work well with keyboard, mouse, touch, reduced motion, and narrow screens.
+
+## Acceptance checks
+
+- C1: The manifest contains 17 unique music video IDs and 2 documented tutorial IDs.
+- C2: Every manifest audio and poster path exists in the production output.
+- C3: Unit tests prove project round-tripping and required FamiTracker text structure.
+- C4: TypeScript passes and Vite creates a production build.
+- C5: Browser smoke test proves library selection, reference playback element, note editing, transport, export controls, and responsive layout.
+- C6: The deployed Pages URL returns HTTP 200 and its asset URLs resolve.
+- C7: A scrub finds no secrets, credentials, cookies, or private personal data in tracked files.
+
+## Out of scope for this recovery pass
+
+- Claiming exact note-for-note recovery without original FTM files or completed video-frame transcription.
+- Binary `.ftm` generation in-browser. The interoperable export is FamiTracker's official text module format (`.txt`).
+- Republishing the two tutorial videos.
+
+## Falsifiers and unknowns
+
+- A recovered original `.ftm` falsifies the corresponding `recoveryStatus: source-missing` entry and should replace the draft.
+- Visual transcription from the screen recordings may recover exact patterns, but frame order, hidden instruments, macros, and off-screen effects still require verification.
+- Cover redistribution rights are not proven by channel ownership alone; credits and source links are preserved, but the operator remains responsible for rights clearance.
