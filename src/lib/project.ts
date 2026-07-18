@@ -34,7 +34,23 @@ export function cloneProject(project: TrackerProject): TrackerProject {
 }
 
 export function preferShippedBaseline(saved: TrackerProject, shipped: TrackerProject | null): TrackerProject {
-  return shipped && saved.contentRevision < shipped.contentRevision ? shipped : saved
+  if (!shipped || saved.contentRevision >= shipped.contentRevision) return saved
+  const hasUserEdits = channelIds.some((id) => saved.cells[id].some((cell) => cell.edited))
+  if (!hasUserEdits) return shipped
+
+  const merged = cloneProject(shipped)
+  for (const id of channelIds) {
+    saved.cells[id].forEach((cell, row) => {
+      if (cell.edited && row < merged.rows) merged.cells[id][row] = { ...cell }
+    })
+  }
+  merged.title = saved.title
+  merged.author = saved.author
+  merged.tempo = saved.tempo
+  merged.speed = saved.speed
+  merged.loop = saved.loop
+  merged.updatedAt = saved.updatedAt
+  return merged
 }
 
 export function serializeProject(project: TrackerProject): string {

@@ -29,6 +29,9 @@ import type { ChannelId, LibraryTrack, TrackerProject } from './types'
 
 type ViewMode = 'tracker' | 'piano'
 type Filter = 'all' | 'original' | 'cover' | 'demo' | 'bonus'
+type PreviewMode = 'source' | 'chip'
+type ChipPurpose = 'preview' | 'fallback'
+type SaveStatus = 'saving' | 'saved' | 'temporary'
 
 const engine = new ChipAudioEngine()
 const storageKey = (id: string) => `n9nes9-chipvault:${id}`
@@ -68,12 +71,16 @@ function App() {
   const [referenceStarting, setReferenceStarting] = useState(false)
   const [referencePlaying, setReferencePlaying] = useState(false)
   const [editing, setEditing] = useState(false)
+  const [previewMode, setPreviewMode] = useState<PreviewMode>(initialTrack.audio ? 'source' : 'chip')
+  const [chipPurpose, setChipPurpose] = useState<ChipPurpose | null>(null)
   const [playhead, setPlayhead] = useState(0)
   const [muted, setMuted] = useState<Set<ChannelId>>(new Set())
   const [message, setMessage] = useState('Ready')
   const [aboutOpen, setAboutOpen] = useState(false)
   const [updateReady, setUpdateReady] = useState(false)
   const [storageHealthy, setStorageHealthy] = useState(() => browserStorage() !== null)
+  const [saveStatus, setSaveStatus] = useState<SaveStatus>(() => browserStorage() ? 'saved' : 'temporary')
+  const [lastSavedAt, setLastSavedAt] = useState<number | null>(null)
   const importRef = useRef<HTMLInputElement>(null)
   const audioRef = useRef<HTMLAudioElement>(null)
   const timerRef = useRef<number | null>(null)
@@ -96,7 +103,14 @@ function App() {
   ), 0), [project])
   const referenceActive = referenceStarting || referencePlaying
   const playbackActive = playing || referenceActive
-  const transportMode = playing ? 'chip-fallback' : referencePlaying ? 'source-playing' : referenceStarting ? 'source-starting' : 'idle'
+  const transportMode = playing ? (chipPurpose === 'fallback' ? 'chip-fallback' : 'chip-preview') : referencePlaying ? 'source-playing' : referenceStarting ? 'source-starting' : 'idle'
+  const playbackName = editing && previewMode === 'chip' ? 'edited chip preview' : selectedTrack.audio ? 'original recording' : 'edited chip preview'
+  const savedTime = lastSavedAt === null ? null : new Date(lastSavedAt).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', second: '2-digit' })
+  const saveText = saveStatus === 'temporary'
+    ? 'Not saved · export to keep'
+    : saveStatus === 'saving'
+      ? 'Saving in this browser…'
+      : `Saved in this browser${savedTime ? ` · ${savedTime}` : ''} · ${editedCount} edit${editedCount === 1 ? '' : 's'}`
 
   useEffect(() => {
     playbackActiveRef.current = playbackActive
@@ -105,6 +119,7 @@ function App() {
   }, [editing, playbackActive, storageHealthy])
 
   const commit = useCallback((mutate: (draft: TrackerProject) => void) => {
+    setSaveStatus(storageHealthyRef.current ? 'saving' : 'temporary')
     setProject((current) => {
       setUndoStack((stack) => [...stack.slice(-49), cloneProject(current)])
       setRedoStack([])
@@ -120,6 +135,7 @@ function App() {
     timerRef.current = null
     engine.stop()
     setPlaying(false)
+    setChipPurpose(null)
     if (nextMessage) setMessage(nextMessage)
   }, [])
 
@@ -154,11 +170,13 @@ function App() {
     setPlayhead(Math.floor(sourceRowPosition(audio.currentTime, project.sourceSync, project.tempo, project.rows)))
   }, [project.rows, project.sourceSync, project.tempo])
 
-  const startChip = useCallback((nextMessage = 'Playing chip preview') => {
+  const startChip = useCallback((nextMessage = 'Playing edited chip preview', purpose: ChipPurpose = 'preview') => {
     stopChip()
     pauseReference()
     broadcastPlayback()
     void engine.unlock()
+    setChipPurpose(purpose)
+    if (purpose === 'fallback') setPreviewMode('chip')
     const rowDuration = 60 / project.tempo / 4
     const sessionTicks = selectedTrack.kind === 'bonus' ? Math.ceil(selectedTrack.duration / rowDuration) : Number.POSITIVE_INFINITY
     let elapsedTicks = 0
@@ -198,7 +216,7 @@ function App() {
         paused: audio.paused,
         readyState: audio.readyState,
       })) {
-        startChip('Source audio stalled — chip fallback active')
+        startChip('Source audio stalled — edited chip fallback active', 'fallback')
         return
       }
       setReferenceStarting(false)
@@ -210,7 +228,7 @@ function App() {
   const beginSourcePlayback = useCallback((looping = false) => {
     const audio = audioRef.current
     if (!audio) {
-      startChip('Source audio unavailable — chip fallback active')
+      startChip('Source audio unavailable — edited chip fallback active', 'fallback')
       return
     }
     stopChip()
@@ -231,10 +249,10 @@ function App() {
       void Promise.resolve(audio.play()).then(() => {
         if (sourceAttemptRef.current === attempt) armSourceWatchdog(attempt, initialTime)
       }).catch(() => {
-        if (sourceAttemptRef.current === attempt) startChip('Source audio was blocked — chip fallback active')
+        if (sourceAttemptRef.current === attempt) startChip('Source audio was blocked — edited chip fallback active', 'fallback')
       })
     } catch {
-      if (sourceAttemptRef.current === attempt) startChip('Source audio was blocked — chip fallback active')
+      if (sourceAttemptRef.current === attempt) startChip('Source audio was blocked — edited chip fallback active', 'fallback')
     }
   }, [armSourceWatchdog, broadcastPlayback, clearSourceWatchdog, project.sourceSync, startChip, stopChip])
 
@@ -251,13 +269,18 @@ function App() {
     setView('tracker')
     setMuted(new Set())
     setEditing(false)
+    setPreviewMode(track.audio ? 'source' : 'chip')
+    setSaveStatus(browserStorage() ? 'saving' : 'temporary')
+    setLastSavedAt(null)
     window.history.replaceState(null, '', `#${track.slug}`)
     setMessage(`Loaded ${track.shortTitle}`)
   }
 
   useEffect(() => {
     const saved = safeStorageSet(browserStorage(), storageKey(selectedId), serializeProject(project))
-    setStorageHealthy((current) => current === saved ? current : saved)
+    setStorageHealthy(saved)
+    setSaveStatus(saved ? 'saved' : 'temporary')
+    if (saved) setLastSavedAt(Date.now())
   }, [project, selectedId])
 
   useEffect(() => () => stopEverything(), [stopEverything])
@@ -352,13 +375,22 @@ function App() {
 
   const setNote = useCallback((channelId: ChannelId, row: number, note: string | null) => {
     if (!editing) return
+    const previous = project.cells[channelId][row]
     commit((draft) => {
       draft.cells[channelId][row].note = note
       draft.cells[channelId][row].edited = true
     })
     setSelectedChannel(channelId)
     setSelectedRow(row)
-  }, [commit, editing])
+    setMessage(note ? `${note} entered · autosaving in this browser` : 'Note cleared · autosaving in this browser')
+    const channel = channels.find((candidate) => candidate.id === channelId)
+    if (note && channel && !playbackActiveRef.current) {
+      void engine.unlock().then((unlocked) => {
+        if (!unlocked || playbackActiveRef.current) return
+        engine.play({ ...previous, note, instrument: previous.instrument ?? 0, volume: previous.volume ?? 12, edited: true }, channel, 0.22)
+      })
+    }
+  }, [commit, editing, project.cells])
 
   useEffect(() => {
     const keys = ['a', 'w', 's', 'e', 'd', 'f', 't', 'g', 'y', 'h', 'u', 'j', 'k']
@@ -391,6 +423,7 @@ function App() {
     if (!previous) return
     setRedoStack((stack) => [...stack, cloneProject(project)])
     setUndoStack((stack) => stack.slice(0, -1))
+    setSaveStatus(storageHealthyRef.current ? 'saving' : 'temporary')
     setProject(previous)
     setMessage('Undid edit')
   }
@@ -400,6 +433,7 @@ function App() {
     if (!next) return
     setUndoStack((stack) => [...stack, cloneProject(project)])
     setRedoStack((stack) => stack.slice(0, -1))
+    setSaveStatus(storageHealthyRef.current ? 'saving' : 'temporary')
     setProject(next)
     setMessage('Redid edit')
   }
@@ -410,8 +444,10 @@ function App() {
       const imported = file.name.toLowerCase().endsWith('.txt')
         ? importFamiTrackerText(text, selectedTrack.id)
         : parseProject(text)
+      const shippedRevision = recoveredProjectForTrack(selectedTrack)?.contentRevision ?? 0
       setUndoStack((stack) => [...stack, cloneProject(project)])
-      setProject({ ...imported, sourceId: selectedTrack.id })
+      setProject({ ...imported, sourceId: selectedTrack.id, contentRevision: Math.max(imported.contentRevision, shippedRevision + 1) })
+      setSaveStatus(storageHealthyRef.current ? 'saving' : 'temporary')
       setMessage(`Imported ${file.name}`)
     } catch (error) {
       setMessage(error instanceof Error ? error.message : 'Import failed')
@@ -456,7 +492,7 @@ function App() {
     clearSourceWatchdog()
     setReferenceStarting(false)
     setReferencePlaying(false)
-    if (shouldRestartSource(project.loop, document.hidden) && !editing) {
+    if (shouldRestartSource(project.loop, document.hidden) && (!editing || previewMode === 'source')) {
       beginSourcePlayback(true)
     } else {
       sourceAttemptRef.current += 1
@@ -465,7 +501,7 @@ function App() {
   }
 
   const handleReferenceError = () => {
-    if (referenceActive) startChip('Source audio failed — chip fallback active')
+    if (referenceActive) startChip('Source audio failed — edited chip fallback active', 'fallback')
     else setMessage('Source recording could not load in this browser')
   }
 
@@ -474,15 +510,31 @@ function App() {
       stopEverything('Paused')
       return
     }
-    if (!editing && audioRef.current) beginSourcePlayback()
-    else startChip()
+    if ((!editing || previewMode === 'source') && audioRef.current) beginSourcePlayback()
+    else startChip(selectedTrack.kind === 'bonus' ? 'Playing editable chiptune arrangement' : 'Playing edited chip preview')
   }
 
   const setEditMode = (next: boolean) => {
     if (next === editing) return
     stopEverything()
     setEditing(next)
-    setMessage(next ? 'Editing a browser working copy' : 'Viewing recovered source')
+    if (next) {
+      const mode: PreviewMode = selectedTrack.audio ? 'source' : 'chip'
+      setPreviewMode(mode)
+      setMessage(mode === 'source' ? 'Editing · original recording selected · changes autosave here' : 'Editing browser chiptune · changes autosave here')
+    } else {
+      setPreviewMode(selectedTrack.audio ? 'source' : 'chip')
+      setMessage('Viewing recovered source')
+    }
+  }
+
+  const choosePreview = (next: PreviewMode) => {
+    if (next === 'source' && !selectedTrack.audio) return
+    stopEverything()
+    setPreviewMode(next)
+    setMessage(next === 'source'
+      ? 'Original recording selected · authentic mix, edits remain visible'
+      : 'Edited chip preview selected · approximate synthesized mix')
   }
 
   const setEditorView = (next: ViewMode) => {
@@ -499,15 +551,10 @@ function App() {
     setMessage('Returned to first row')
   }
 
-  const saveWorkspace = () => {
-    const saved = safeStorageSet(browserStorage(), storageKey(selectedId), serializeProject(project))
-    setStorageHealthy(saved)
-    setMessage(saved ? 'Saved in this browser' : 'Browser storage is blocked; export JSON to keep these edits')
-  }
-
   const reset = () => {
     if (!window.confirm(`Reset local edits for “${selectedTrack.shortTitle}”?`)) return
     setUndoStack((stack) => [...stack, cloneProject(project)])
+    setSaveStatus(storageHealthyRef.current ? 'saving' : 'temporary')
     setProject(recoveredProjectForTrack(selectedTrack) ?? createDraft(selectedTrack))
     setMessage('Restored the clean recovery baseline')
   }
@@ -596,7 +643,7 @@ function App() {
         <section className="workbench" data-transport={transportMode}>
           <div className="transport-bar">
             <div className="transport-buttons">
-              <button className="play-button" onClick={toggleTransport} aria-label={playbackActive ? 'Pause playback' : 'Play tracker'}>{playbackActive ? '■' : '▶'}</button>
+              <button className="play-button" onClick={toggleTransport} aria-label={playbackActive ? `Pause ${playbackName}` : `Play ${playbackName}`} title={playbackActive ? `Pause ${playbackName}` : `Play ${playbackName}`}>{playbackActive ? '■' : '▶'}</button>
               <button onClick={returnToStart} aria-label="Return to first row">↤</button>
             </div>
             <label>BPM<input type="number" min="32" max="300" disabled={!editing} value={project.tempo} onChange={(event) => commit((draft) => { draft.tempo = Number(event.target.value) })} /></label>
@@ -605,9 +652,19 @@ function App() {
             <div className="transport-spacer" />
             <button onClick={undo} disabled={!undoStack.length} title="Undo">↶</button>
             <button onClick={redo} disabled={!redoStack.length} title="Redo">↷</button>
-            {editing && <button className="save-button" onClick={saveWorkspace}>Save</button>}
-            <span className={`save-state ${editedCount ? 'has-edits' : ''} ${storageHealthy ? '' : 'temporary'}`}><i /> {editing ? (storageHealthy ? `${editedCount} user-edited cell${editedCount === 1 ? '' : 's'}` : 'temporary session') : 'source view'}</span>
+            <span className={`save-state ${editedCount ? 'has-edits' : ''} ${saveStatus}`} role="status" aria-live="polite" title="Projects are stored only in this browser on this device. Export JSON for a portable backup."><i /> {editing ? saveText : 'source view'}</span>
           </div>
+
+          {editing && <div className="edit-session-bar">
+            <div className="preview-switch" role="group" aria-label="Playback preview">
+              <button className={previewMode === 'source' ? 'active' : ''} disabled={!selectedTrack.audio} onClick={() => choosePreview('source')}><span>Original mix</span><small>{selectedTrack.audio ? 'authentic recording' : 'unavailable'}</small></button>
+              <button className={previewMode === 'chip' ? 'active' : ''} onClick={() => choosePreview('chip')}><span>Edited preview</span><small>browser chiptune</small></button>
+            </div>
+            <p>{previewMode === 'source'
+              ? <><strong>Authentic sound</strong><span>Your edits stay visible and each entered note is auditioned. Switch to Edited preview to hear the whole editable draft.</span></>
+              : <><strong>Approximate edited sound</strong><span>This synthesizes the reconstructed notes, so it will not match the original recording exactly.</span></>}</p>
+            <div className={`edit-save-card ${saveStatus}`} role="status" aria-live="polite"><i /><span><strong>{saveStatus === 'temporary' ? 'Not saved' : saveStatus === 'saving' ? 'Saving…' : 'Saved locally'}</strong><small>{saveStatus === 'temporary' ? 'Export JSON before closing' : savedTime ? `This browser · ${savedTime} · ${editedCount} edit${editedCount === 1 ? '' : 's'}` : 'Autosave is ready'}</small></span></div>
+          </div>}
 
           <div className="editor-tabs">
             <div role="tablist" aria-label="Editor view">

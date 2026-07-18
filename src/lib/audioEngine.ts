@@ -1,6 +1,21 @@
 import type { ChannelDefinition, TrackerCell } from '../types'
 import { noteToMidi } from './project'
 
+const channelMix: Record<ChannelDefinition['id'], number> = {
+  pulse1: 0.52,
+  pulse2: 0.34,
+  triangle: 0.48,
+  noise: 0.14,
+  dpcm: 0,
+  vrc6Pulse1: 0.52,
+  vrc6Pulse2: 0.32,
+  vrc6Saw: 0.36,
+}
+
+export function channelMixLevel(id: ChannelDefinition['id']): number {
+  return channelMix[id]
+}
+
 export class ChipAudioEngine {
   private context: AudioContext | null = null
   private master: GainNode | null = null
@@ -10,7 +25,7 @@ export class ChipAudioEngine {
     if (!this.context) {
       this.context = new AudioContext()
       this.master = this.context.createGain()
-      this.master.gain.value = 0.22
+      this.master.gain.value = 0.18
       this.master.connect(this.context.destination)
     }
     return this.context
@@ -33,7 +48,9 @@ export class ChipAudioEngine {
       if (context.state === 'suspended') void context.resume()
       const gain = context.createGain()
       const now = context.currentTime
-      const volume = Math.max(0.015, (cell.volume ?? 15) / 15)
+      const trackerVolume = cell.volume ?? 15
+      if (trackerVolume <= 0) return false
+      const volume = Math.max(0.003, (trackerVolume / 15) * channelMixLevel(channel.id))
       gain.gain.setValueAtTime(volume, now)
       gain.gain.exponentialRampToValueAtTime(0.001, now + Math.max(0.03, duration * 0.92))
       gain.connect(this.master!)

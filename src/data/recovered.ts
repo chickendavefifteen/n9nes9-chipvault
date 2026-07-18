@@ -102,7 +102,7 @@ function audioTranscription(track: LibraryTrack, data: AudioTranscription): Trac
   project.tempo = data.tempo
   project.patternLength = 64
   project.recoveryStatus = 'audio-transcribed'
-  project.contentRevision = 2
+  project.contentRevision = 3
   project.sourceSync = {
     audioOffset: data.audioOffset,
     secondsPerRow: data.secondsPerRow,
@@ -120,9 +120,9 @@ function audioTranscription(track: LibraryTrack, data: AudioTranscription): Trac
   const bassChannel: ChannelId = track.expansion === 'VRC6' ? 'vrc6Saw' : 'triangle'
   for (let row = 0; row < data.rows; row += 1) {
     if (data.melody[row]) put(project, leadChannel, row, data.melody[row], 0, 13)
-    if (data.harmony[row]) put(project, harmonyChannel, row, data.harmony[row], 0, 8)
-    if (data.bass[row]) put(project, bassChannel, row, data.bass[row], 0, 10)
-    if (data.noise[row]) put(project, 'noise', row, data.noise[row], 3, row % 8 === 0 ? 12 : 7)
+    if (data.harmony[row]) put(project, harmonyChannel, row, data.harmony[row], 0, 5)
+    if (data.bass[row]) put(project, bassChannel, row, data.bass[row], 0, 8)
+    if (data.noise[row]) put(project, 'noise', row, data.noise[row], 3, row % 8 === 0 ? 8 : 4)
   }
   return project
 }

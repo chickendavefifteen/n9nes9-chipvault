@@ -148,8 +148,10 @@ def transcribe(path: Path) -> dict[str, object]:
         melody.append(midi_note(lead_midi) if emit_lead else None)
         previous_melody = lead_midi
 
-        second = next((midi for _, midi in lead_ranked[1:] if abs(midi - lead_midi) not in (0, 1, 11, 12, 13)), lead_midi - 12)
-        harmony.append(midi_note(second) if row % 2 == 1 else None)
+        # A second independent spectral peak in a compressed full mix is often
+        # a harmonic or percussion partial, not a real counter-melody. Use a
+        # quiet octave echo so the editable preview stays musically coherent.
+        harmony.append(midi_note(max(36, lead_midi - 12)) if row % 2 == 1 else None)
         bass.append(midi_note(bass_ranked[0][1]) if row % 4 == 0 else None)
         hit = onset[row] >= onset_threshold or row % 8 == 0
         noise.append(("C-#" if row % 8 == 0 else "6-#") if hit else None)

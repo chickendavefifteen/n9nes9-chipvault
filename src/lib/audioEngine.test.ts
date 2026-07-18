@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, it } from 'vitest'
-import { ChipAudioEngine } from './audioEngine'
+import { channelMixLevel, ChipAudioEngine } from './audioEngine'
 import type { ChannelDefinition, TrackerCell } from '../types'
 
 const originalAudioContext = globalThis.AudioContext
@@ -9,6 +9,13 @@ afterEach(() => {
 })
 
 describe('chip audio fallback', () => {
+  it('keeps dense reconstructed channels below the lead and rhythm out of the foreground', () => {
+    expect(channelMixLevel('vrc6Pulse1')).toBeGreaterThan(channelMixLevel('vrc6Pulse2'))
+    expect(channelMixLevel('vrc6Pulse1')).toBeGreaterThan(channelMixLevel('vrc6Saw'))
+    expect(channelMixLevel('noise')).toBeLessThan(channelMixLevel('vrc6Pulse2'))
+    expect(channelMixLevel('dpcm')).toBe(0)
+  })
+
   it('unlocks the audio context during a user-started transport action', async () => {
     class FakeAudioContext {
       state: AudioContextState = 'suspended'
