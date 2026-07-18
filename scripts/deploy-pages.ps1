@@ -70,7 +70,9 @@ try {
     currentIndexAssets = $currentRefs
     retainedAssets = $retainedAssets
   }
-  $compatibility | ConvertTo-Json -Depth 3 | Set-Content -Encoding utf8 (Join-Path $checkout 'assets/deploy-compatibility.json')
+  $compatibilityJson = $compatibility | ConvertTo-Json -Depth 3
+  $utf8WithoutBom = New-Object System.Text.UTF8Encoding($false)
+  [System.IO.File]::WriteAllText((Join-Path $checkout 'assets/deploy-compatibility.json'), $compatibilityJson, $utf8WithoutBom)
 
   Invoke-Checked 'git' @('-C', $checkout, 'add', '-A') $repo
   $changes = (& git -C $checkout status --porcelain)
