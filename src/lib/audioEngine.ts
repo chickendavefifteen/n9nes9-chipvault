@@ -22,7 +22,7 @@ export class ChipAudioEngine {
     const context = this.ensureContext()
     const gain = context.createGain()
     const now = context.currentTime
-    const volume = Math.max(0.015, cell.volume / 15)
+    const volume = Math.max(0.015, (cell.volume ?? 15) / 15)
     gain.gain.setValueAtTime(volume, now)
     gain.gain.exponentialRampToValueAtTime(0.001, now + Math.max(0.03, duration * 0.92))
     gain.connect(this.master!)

@@ -2,16 +2,18 @@
 
 An archive and modern browser tracker for the 17 music/demo uploads on the [N9NES9 YouTube channel](https://www.youtube.com/@n9nes9/videos).
 
-The source recordings are preserved locally in the site. Each track also has an editable NES + VRC6 recovery project with a classic tracker grid, piano roll, keyboard entry, chip-synth preview, local autosave, undo/redo, and open downloads.
+The source recordings are preserved locally in the site. Each track also has an editable NES + VRC6 recovery project with a classic tracker grid, piano roll, keyboard entry, chip-synth preview, browser autosave, undo/redo, and optional exports. Opening the editor never starts a download.
 
 ## Recovery integrity
 
-The audio recordings are authentic channel downloads. The editable patterns start blank because YouTube's mixed audio does not retain the original notes, instruments, effects, or frame order. The UI labels this state everywhere it matters. A recovered module can be imported as either:
+The audio recordings are authentic channel downloads. **Game Complete Loop** has the first video-frame recovery: two visible 64-row orders, source-audio synchronization, and confidence-labelled reconstructed instruments. The other editable patterns start blank until their recorded FamiTracker grids are transcribed. The UI labels both states everywhere they matter. A recovered module can be imported as either:
 
 - Chipvault JSON (`.chipvault.json`) for lossless browser-editor round trips.
 - FamiTracker 0.4.6 text (`.txt`) for FamiTracker/FamiStudio interoperability.
 
-The editor exports the same two formats. It does not invent a binary `.ftm` wrapper.
+The editor exports the same two formats, including multi-pattern FamiTracker text round trips. Export is a separate optional action. It does not invent a binary `.ftm` wrapper.
+
+The application itself is cloud-hosted on GitHub Pages. Working copies currently persist in the browser; genuine cross-device saving requires a writable authenticated backend and is deliberately not misrepresented as active.
 
 ## Local development
 

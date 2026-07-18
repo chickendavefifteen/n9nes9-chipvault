@@ -87,7 +87,7 @@ export const library: LibraryTrack[] = [
     id: 'TejsLqPt0-k', slug: 'game-complete-loop', title: 'FamiTracker - Game Complete Loop (Original)', shortTitle: 'Game Complete Loop',
     kind: 'original', duration: 48, uploaded: '2012-04-05', expansion: 'VRC6',
     description: 'A short 12-second loop written for an assignment game.', sourceUrl: 'https://www.youtube.com/watch?v=TejsLqPt0-k',
-    audio: 'audio/TejsLqPt0-k.m4a', poster: 'posters/TejsLqPt0-k.jpg', recoveryStatus: 'source-missing',
+    audio: 'audio/TejsLqPt0-k.m4a', poster: 'posters/TejsLqPt0-k.jpg', recoveryStatus: 'pattern-recovered',
   },
   {
     id: 'J9TnXwQS7e4', slug: 'dead-feelings', title: 'FamiTracker - Dead Feelings (Cover)', shortTitle: 'Dead Feelings',

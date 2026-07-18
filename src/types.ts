@@ -1,5 +1,5 @@
 export type TrackKind = 'original' | 'cover' | 'demo'
-export type RecoveryStatus = 'source-missing' | 'original-module'
+export type RecoveryStatus = 'source-missing' | 'pattern-recovered' | 'original-module'
 
 export interface LibraryTrack {
   id: string
@@ -38,9 +38,17 @@ export interface ChannelDefinition {
 
 export interface TrackerCell {
   note: string | null
-  instrument: number
-  volume: number
+  instrument: number | null
+  volume: number | null
   effect: string
+}
+
+export interface SourceSync {
+  audioOffset: number
+  secondsPerRow: number
+  loopRows: number
+  confidence: number
+  evidence: string[]
 }
 
 export interface TrackerProject {
@@ -51,8 +59,11 @@ export interface TrackerProject {
   tempo: number
   speed: number
   rows: number
+  patternLength: number
   loop: boolean
   cells: Record<ChannelId, TrackerCell[]>
   updatedAt: string
   recoveryStatus: RecoveryStatus
+  contentRevision: number
+  sourceSync?: SourceSync
 }

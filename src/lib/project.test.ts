@@ -2,6 +2,7 @@ import { describe, expect, it } from 'vitest'
 import { existsSync } from 'node:fs'
 import { resolve } from 'node:path'
 import { library, tutorials } from '../data/library'
+import { recoveredProjectForTrack } from '../data/recovered'
 import { createDraft, exportFamiTrackerText, importFamiTrackerText, parseProject, serializeProject } from './project'
 
 describe('Chipvault project interchange', () => {
@@ -31,7 +32,7 @@ describe('Chipvault project interchange', () => {
     expect(output).toContain('EXPANSION 1')
     expect(output).toContain('TRACK 64 6 150')
     expect(output).toContain('ROW 04')
-    expect(output).toContain('A-2 01 F')
+    expect(output).toContain('A-2 01 .')
   })
 
   it('re-imports the module text it exports', () => {
@@ -40,5 +41,22 @@ describe('Chipvault project interchange', () => {
     const restored = importFamiTrackerText(exportFamiTrackerText(project), project.sourceId)
     expect(restored.cells.pulse2[12].note).toBe('F#5')
     expect(restored.title).toBe(project.title)
+  })
+
+  it('round-trips recovered multi-pattern data and effect-only rows', () => {
+    const recovered = recoveredProjectForTrack(library.find((track) => track.id === 'TejsLqPt0-k')!)!
+    expect(recovered.rows).toBe(128)
+    expect(recovered.patternLength).toBe(64)
+    expect(recovered.cells.vrc6Pulse1.filter((cell) => cell.note).length).toBeGreaterThan(20)
+    const exported = exportFamiTrackerText(recovered)
+    expect(exported).toContain('ORDER 01')
+    expect(exported).toContain('PATTERN 01')
+    expect(exported).toContain('INST2A03 3')
+    expect(exported).toContain('INSTVRC6 0')
+    const restored = importFamiTrackerText(exported, recovered.sourceId)
+    expect(restored.rows).toBe(128)
+    expect(restored.cells.vrc6Pulse1[64].note).toBe(recovered.cells.vrc6Pulse1[64].note)
+    const effectRow = recovered.cells.vrc6Pulse1.findIndex((cell) => !cell.note && cell.effect)
+    if (effectRow >= 0) expect(restored.cells.vrc6Pulse1[effectRow].effect).toBe(recovered.cells.vrc6Pulse1[effectRow].effect)
   })
 })

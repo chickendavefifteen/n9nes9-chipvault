@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { channels, library } from './data/library'
+import { recoveredProjectForTrack } from './data/recovered'
 import { ChipAudioEngine } from './lib/audioEngine'
 import {
   cloneProject,
@@ -21,9 +22,15 @@ const storageKey = (id: string) => `n9nes9-chipvault:${id}`
 const asset = (path: string) => `${import.meta.env.BASE_URL}${path}`
 
 function loadProject(track: LibraryTrack): TrackerProject {
+  const recovered = recoveredProjectForTrack(track)
   const stored = localStorage.getItem(storageKey(track.id))
-  if (!stored) return createDraft(track)
-  try { return parseProject(stored) } catch { return createDraft(track) }
+  if (!stored) return recovered ?? createDraft(track)
+  try {
+    const saved = parseProject(stored)
+    return recovered && saved.contentRevision < recovered.contentRevision ? recovered : saved
+  } catch {
+    return recovered ?? createDraft(track)
+  }
 }
 
 function filename(title: string, extension: string): string {
@@ -44,6 +51,8 @@ function App() {
   const [selectedRow, setSelectedRow] = useState(0)
   const [octave, setOctave] = useState(4)
   const [playing, setPlaying] = useState(false)
+  const [referencePlaying, setReferencePlaying] = useState(false)
+  const [editing, setEditing] = useState(false)
   const [playhead, setPlayhead] = useState(0)
   const [muted, setMuted] = useState<Set<ChannelId>>(new Set())
   const [message, setMessage] = useState('Ready')
@@ -78,6 +87,14 @@ function App() {
     setMessage('Stopped')
   }, [])
 
+  const syncReference = useCallback(() => {
+    const audio = audioRef.current
+    const sync = project.sourceSync
+    if (!audio || !sync) return
+    const elapsed = Math.max(0, audio.currentTime - sync.audioOffset)
+    setPlayhead(Math.floor(elapsed / sync.secondsPerRow) % sync.loopRows)
+  }, [project.sourceSync])
+
   const start = useCallback(() => {
     if (playing) { stop(); return }
     audioRef.current?.pause()
@@ -102,12 +119,15 @@ function App() {
 
   const selectTrack = (track: LibraryTrack) => {
     stop()
+    audioRef.current?.pause()
     setSelectedId(track.id)
     setProject(loadProject(track))
     setUndoStack([])
     setRedoStack([])
     setPlayhead(0)
     setSelectedRow(0)
+    setEditing(false)
+    setReferencePlaying(false)
     window.history.replaceState(null, '', `#${track.slug}`)
     setMessage(`Loaded ${track.shortTitle}`)
   }
@@ -119,17 +139,19 @@ function App() {
   useEffect(() => () => stop(), [stop])
 
   const setNote = useCallback((channelId: ChannelId, row: number, note: string | null) => {
+    if (!editing) return
     commit((draft) => { draft.cells[channelId][row].note = note })
     setSelectedChannel(channelId)
     setSelectedRow(row)
-  }, [commit])
+  }, [commit, editing])
 
   useEffect(() => {
     const keys = ['a', 'w', 's', 'e', 'd', 'f', 't', 'g', 'y', 'h', 'u', 'j', 'k']
     const handler = (event: KeyboardEvent) => {
       const target = event.target as HTMLElement
       if (target.matches('input, select, textarea, button, audio')) return
-      if (event.code === 'Space') { event.preventDefault(); start(); return }
+      if (event.code === 'Space') { event.preventDefault(); toggleTransport(); return }
+      if (!editing) return
       if (event.key === 'Delete' || event.key === 'Backspace') {
         event.preventDefault()
         setNote(selectedChannel, selectedRow, null)
@@ -146,7 +168,7 @@ function App() {
     }
     window.addEventListener('keydown', handler)
     return () => window.removeEventListener('keydown', handler)
-  }, [octave, project.rows, selectedChannel, selectedRow, setNote, start])
+  }, [editing, octave, project.rows, selectedChannel, selectedRow, setNote, toggleTransport])
 
   const undo = () => {
     const previous = undoStack.at(-1)
@@ -190,6 +212,41 @@ function App() {
     setMessage('Downloaded FamiTracker text module')
   }
 
+  function toggleTransport() {
+    if (!editing && audioRef.current) {
+      if (audioRef.current.paused) {
+        if (project.sourceSync && audioRef.current.currentTime < project.sourceSync.audioOffset) audioRef.current.currentTime = project.sourceSync.audioOffset
+        void audioRef.current.play()
+      } else {
+        audioRef.current.pause()
+      }
+      return
+    }
+    start()
+  }
+
+  const setEditMode = (next: boolean) => {
+    stop()
+    audioRef.current?.pause()
+    setReferencePlaying(false)
+    setEditing(next)
+    setMessage(next ? 'Editing a browser working copy' : 'Viewing recovered source')
+  }
+
+  const returnToStart = () => {
+    stop()
+    audioRef.current?.pause()
+    if (audioRef.current) audioRef.current.currentTime = project.sourceSync?.audioOffset ?? 0
+    setReferencePlaying(false)
+    setPlayhead(0)
+    setMessage('Returned to first row')
+  }
+
+  const saveWorkspace = () => {
+    localStorage.setItem(storageKey(selectedId), serializeProject(project))
+    setMessage('Saved in this browser')
+  }
+
   const reset = () => {
     if (!window.confirm(`Clear the local recovery draft for “${selectedTrack.shortTitle}”?`)) return
     setUndoStack((stack) => [...stack, cloneProject(project)])
@@ -204,7 +261,7 @@ function App() {
           <span className="brand-mark" aria-hidden="true"><i /><i /><i /><i /></span>
           <span><b>N9NES9</b><em>CHIPVAULT</em></span>
         </a>
-        <div className="topbar-status"><span className="live-dot" /> 17 recordings preserved</div>
+        <div className="topbar-status"><span className="live-dot" /> Online tracker · 17 recordings</div>
         <button className="ghost-button" onClick={() => setAboutOpen(true)}>About the recovery</button>
       </header>
 
@@ -243,32 +300,39 @@ function App() {
             <p>{selectedTrack.description}</p>
             {selectedTrack.credit && <p className="credit">{selectedTrack.credit}</p>}
             <div className="source-player">
-              <audio ref={audioRef} key={selectedTrack.id} src={asset(selectedTrack.audio)} controls preload="metadata" onPlay={stop} />
+              <audio ref={audioRef} key={selectedTrack.id} src={asset(selectedTrack.audio)} controls preload="metadata" onPlay={() => { stop(); setReferencePlaying(true); setMessage('Playing original recording') }} onPause={() => setReferencePlaying(false)} onTimeUpdate={syncReference} />
+              <button className={`edit-online-button ${editing ? 'active' : ''}`} onClick={() => setEditMode(!editing)}>{editing ? 'Finish editing' : 'Edit in browser'}</button>
               <a className="download-link" href={asset(selectedTrack.audio)} download={`${selectedTrack.slug}.m4a`}>Download source audio ↓</a>
               <a className="youtube-link" href={selectedTrack.sourceUrl} target="_blank" rel="noreferrer">Original upload ↗</a>
             </div>
           </div>
         </section>
 
-        <section className="recovery-banner">
+        <section className={`recovery-banner ${project.recoveryStatus === 'pattern-recovered' ? 'recovered' : ''}`}>
           <span className="warning-icon" aria-hidden="true">!</span>
-          <div><strong>Recovery draft — original module not yet found</strong><p>The recording is authentic. Pattern data starts blank until transcribed or an original FTM is imported. Edits are autosaved only in this browser.</p></div>
+          {project.recoveryStatus === 'pattern-recovered' ? (
+            <div><strong>Animated pattern recovered from the video · {Math.round((project.sourceSync?.confidence ?? 0) * 100)}% transcription confidence</strong><p>{project.rows / project.patternLength} visible FamiTracker orders are synchronised to the original recording. Hidden instrument envelopes remain reconstructed, not original.</p></div>
+          ) : (
+            <div><strong>Recovery draft — original module not yet found</strong><p>The recording is authentic. Pattern data starts blank until transcribed or an original FTM is imported. Edits are autosaved only in this browser.</p></div>
+          )}
           <button onClick={() => setAboutOpen(true)}>Why?</button>
         </section>
 
         <section className="workbench">
           <div className="transport-bar">
             <div className="transport-buttons">
-              <button className="play-button" onClick={start} aria-label={playing ? 'Stop chip preview' : 'Play chip preview'}>{playing ? '■' : '▶'}</button>
-              <button onClick={() => setPlayhead(0)} aria-label="Return to first row">↤</button>
+              <button className="play-button" onClick={toggleTransport} aria-label={(playing || referencePlaying) ? 'Pause playback' : 'Play tracker'}>{(playing || referencePlaying) ? '■' : '▶'}</button>
+              <button onClick={returnToStart} aria-label="Return to first row">↤</button>
             </div>
-            <label>BPM<input type="number" min="32" max="300" value={project.tempo} onChange={(event) => commit((draft) => { draft.tempo = Number(event.target.value) })} /></label>
-            <label>Speed<input type="number" min="1" max="31" value={project.speed} onChange={(event) => commit((draft) => { draft.speed = Number(event.target.value) })} /></label>
-            <label className="loop-control"><input type="checkbox" checked={project.loop} onChange={(event) => commit((draft) => { draft.loop = event.target.checked })} /> Loop</label>
+            <label>BPM<input type="number" min="32" max="300" disabled={!editing} value={project.tempo} onChange={(event) => commit((draft) => { draft.tempo = Number(event.target.value) })} /></label>
+            <label>Speed<input type="number" min="1" max="31" disabled={!editing} value={project.speed} onChange={(event) => commit((draft) => { draft.speed = Number(event.target.value) })} /></label>
+            <label className="loop-control"><input type="checkbox" disabled={!editing} checked={project.loop} onChange={(event) => commit((draft) => { draft.loop = event.target.checked })} /> Loop</label>
             <div className="transport-spacer" />
             <button onClick={undo} disabled={!undoStack.length} title="Undo">↶</button>
             <button onClick={redo} disabled={!redoStack.length} title="Redo">↷</button>
-            <span className="save-state"><i /> autosaved</span>
+            {editing && <button className="save-button" onClick={saveWorkspace}>Save</button>}
+            <details className="export-menu"><summary>Export</summary><div><button onClick={exportNative}>Chipvault JSON</button><button onClick={exportFami}>FamiTracker TXT</button><button onClick={() => importRef.current?.click()}>Import project</button></div></details>
+            <span className="save-state"><i /> {editing ? 'browser autosave' : 'source view'}</span>
           </div>
 
           <div className="editor-tabs">
@@ -280,36 +344,31 @@ function App() {
           </div>
 
           {view === 'tracker' ? (
-            <TrackerGrid project={project} playhead={playhead} selectedChannel={selectedChannel} selectedRow={selectedRow} muted={muted} onMute={(id) => setMuted((current) => { const next = new Set(current); next.has(id) ? next.delete(id) : next.add(id); return next })} onSelect={(id, row) => { setSelectedChannel(id); setSelectedRow(row) }} onClear={(id, row) => setNote(id, row, null)} />
+            <TrackerGrid project={project} playhead={playhead} selectedChannel={selectedChannel} selectedRow={selectedRow} muted={muted} editing={editing} onMute={(id) => setMuted((current) => { const next = new Set(current); next.has(id) ? next.delete(id) : next.add(id); return next })} onSelect={(id, row) => { setSelectedChannel(id); setSelectedRow(row) }} onClear={(id, row) => setNote(id, row, null)} />
           ) : (
-            <PianoRoll project={project} channelId={selectedChannel} selectedRow={selectedRow} onChannel={setSelectedChannel} onSetNote={setNote} />
+            <PianoRoll project={project} channelId={selectedChannel} selectedRow={selectedRow} editing={editing} onChannel={setSelectedChannel} onSetNote={setNote} />
           )}
 
-          <div className="entry-strip">
+          <div className={`entry-strip ${editing ? '' : 'viewing'}`}>
             <div><span className="eyebrow">Selected cell</span><strong>{channels.find((channel) => channel.id === selectedChannel)?.name} · row {selectedRow.toString(16).padStart(2, '0').toUpperCase()}</strong></div>
-            <div className="note-keys" aria-label="Quick note entry">
+            {editing ? <><div className="note-keys" aria-label="Quick note entry">
               {Array.from({ length: 12 }, (_, index) => midiToNote((octave + 1) * 12 + index)).map((note) => (
                 <button key={note} className={note.includes('#') ? 'sharp' : ''} onClick={() => setNote(selectedChannel, selectedRow, note)}>{note}</button>
               ))}
               <button className="clear-note" onClick={() => setNote(selectedChannel, selectedRow, null)}>clear</button>
             </div>
             <div className="cell-inspector">
-              <label>Volume <input type="range" min="0" max="15" value={selectedCell.volume} onChange={(event) => commit((draft) => { draft.cells[selectedChannel][selectedRow].volume = Number(event.target.value) })} /><output>{selectedCell.volume.toString(16).toUpperCase()}</output></label>
+              <label>Volume <input type="range" min="0" max="15" value={selectedCell.volume ?? 15} onChange={(event) => commit((draft) => { draft.cells[selectedChannel][selectedRow].volume = Number(event.target.value) })} /><output>{(selectedCell.volume ?? 15).toString(16).toUpperCase()}</output></label>
               <label>Effect <input aria-label="Effect command" value={selectedCell.effect} maxLength={3} placeholder="0xy" onChange={(event) => { const value = event.target.value.toUpperCase().replace(/[^0-9A-FP-Z]/g, '').slice(0, 3); commit((draft) => { draft.cells[selectedChannel][selectedRow].effect = value }) }} /></label>
             </div>
-            <p><kbd>A–K</kbd> enter notes · <kbd>Z/X</kbd> octave · <kbd>Del</kbd> clear · <kbd>Space</kbd> play</p>
+            <p><kbd>A–K</kbd> enter notes · <kbd>Z/X</kbd> octave · <kbd>Del</kbd> clear · <kbd>Space</kbd> play</p></> : <div className="view-mode-copy"><strong>Playing the recovered source timeline</strong><span>Press “Edit in browser” to make a working copy. Nothing downloads until you choose Export.</span></div>}
           </div>
         </section>
 
-        <section className="export-panel">
-          <div><p className="eyebrow">Take it with you</p><h3>Open files. No lock-in.</h3><p>Chipvault JSON preserves every editor field. FamiTracker TXT imports into FamiTracker 0.4.6 and FamiStudio.</p></div>
-          <div className="export-actions">
-            <button className="primary-action" onClick={exportNative}><span>Editable project</span><small>.chipvault.json</small></button>
-            <button className="primary-action" onClick={exportFami}><span>FamiTracker module</span><small>.famitracker.txt</small></button>
-            <button onClick={() => importRef.current?.click()}><span>Import project</span><small>.json or .txt</small></button>
-            <button className="danger-action" onClick={reset}><span>Fresh draft</span><small>clear local pattern</small></button>
-            <input ref={importRef} type="file" accept=".json,.txt" hidden onChange={(event) => { const file = event.target.files?.[0]; if (file) void onImport(file); event.target.value = '' }} />
-          </div>
+        <section className="export-panel workspace-panel">
+          <div><p className="eyebrow">Online workspace</p><h3>Edit first. Export only when you want it.</h3><p>The tracker runs entirely in the page and saves working copies in this browser. Cross-device cloud sync is the next backend step; it is not being falsely presented as active.</p></div>
+          <div className="workspace-actions"><button className="primary-action" onClick={() => setEditMode(true)}><span>Open editor</span><small>interactive browser workspace</small></button><button onClick={saveWorkspace}><span>Save working copy</span><small>persistent in this browser</small></button><button className="danger-action" onClick={reset}><span>Fresh draft</span><small>clear local pattern</small></button></div>
+          <input ref={importRef} type="file" accept=".json,.txt" hidden onChange={(event) => { const file = event.target.files?.[0]; if (file) void onImport(file); event.target.value = '' }} />
         </section>
         <footer><span>{message}</span><span>Built for preservation · no analytics · data stays local</span></footer>
       </main>
@@ -319,27 +378,36 @@ function App() {
   )
 }
 
-function TrackerGrid({ project, playhead, selectedChannel, selectedRow, muted, onMute, onSelect, onClear }: {
+function TrackerGrid({ project, playhead, selectedChannel, selectedRow, muted, editing, onMute, onSelect, onClear }: {
   project: TrackerProject
   playhead: number
   selectedChannel: ChannelId
   selectedRow: number
   muted: Set<ChannelId>
+  editing: boolean
   onMute: (id: ChannelId) => void
   onSelect: (id: ChannelId, row: number) => void
   onClear: (id: ChannelId, row: number) => void
 }) {
+  const scrollRef = useRef<HTMLDivElement>(null)
+  const activeRowRef = useRef<HTMLTableRowElement>(null)
+  useEffect(() => {
+    const container = scrollRef.current
+    const row = activeRowRef.current
+    if (!container || !row) return
+    container.scrollTop = row.offsetTop - (container.clientHeight - row.clientHeight) / 2
+  }, [playhead])
   return (
-    <div className="tracker-scroll">
+    <div className="tracker-scroll" ref={scrollRef}>
       <table className="tracker-table">
         <thead><tr><th>ROW</th>{channels.map((channel) => <th key={channel.id} style={{ '--channel': channel.color } as React.CSSProperties}><button onClick={() => onMute(channel.id)} className={muted.has(channel.id) ? 'muted' : ''}><span>{channel.short}</span><small>{muted.has(channel.id) ? 'muted' : channel.name}</small></button></th>)}</tr></thead>
         <tbody>{Array.from({ length: project.rows }, (_, row) => (
-          <tr key={row} className={playhead === row ? 'playing-row' : ''}>
-            <th>{row.toString(16).padStart(2, '0').toUpperCase()}</th>
+          <tr key={row} ref={playhead === row ? activeRowRef : undefined} className={playhead === row ? 'playing-row' : ''}>
+            <th>{Math.floor(row / project.patternLength).toString(16).padStart(2, '0').toUpperCase()}:{(row % project.patternLength).toString(16).padStart(2, '0').toUpperCase()}</th>
             {channels.map((channel) => {
               const cell = project.cells[channel.id][row]
               const selected = channel.id === selectedChannel && row === selectedRow
-              return <td key={channel.id}><button className={selected ? 'selected-cell' : ''} onClick={() => onSelect(channel.id, row)} onDoubleClick={() => onClear(channel.id, row)} onContextMenu={(event) => { event.preventDefault(); onClear(channel.id, row) }}><b>{cell.note ?? '···'}</b><span>{cell.note ? cell.instrument.toString(16).padStart(2, '0').toUpperCase() : '··'} {cell.note ? cell.volume.toString(16).toUpperCase() : '·'} {cell.effect || '···'}</span></button></td>
+              return <td key={channel.id}><button className={selected ? 'selected-cell' : ''} onClick={() => onSelect(channel.id, row)} onDoubleClick={() => { if (editing) onClear(channel.id, row) }} onContextMenu={(event) => { if (editing) { event.preventDefault(); onClear(channel.id, row) } }}><b>{cell.note ?? '···'}</b><span>{cell.note && cell.instrument !== null ? cell.instrument.toString(16).padStart(2, '0').toUpperCase() : '··'} {cell.note && cell.volume !== null ? cell.volume.toString(16).toUpperCase() : '·'} {cell.effect || '···'}</span></button></td>
             })}
           </tr>
         ))}</tbody>
@@ -348,10 +416,11 @@ function TrackerGrid({ project, playhead, selectedChannel, selectedRow, muted, o
   )
 }
 
-function PianoRoll({ project, channelId, selectedRow, onChannel, onSetNote }: {
+function PianoRoll({ project, channelId, selectedRow, editing, onChannel, onSetNote }: {
   project: TrackerProject
   channelId: ChannelId
   selectedRow: number
+  editing: boolean
   onChannel: (id: ChannelId) => void
   onSetNote: (id: ChannelId, row: number, note: string | null) => void
 }) {
@@ -362,7 +431,7 @@ function PianoRoll({ project, channelId, selectedRow, onChannel, onSetNote }: {
       <div className="piano-toolbar"><label>Editing<select value={channelId} onChange={(event) => onChannel(event.target.value as ChannelId)}>{channels.map((channel) => <option value={channel.id} key={channel.id}>{channel.name}</option>)}</select></label><span>Click to draw · click again to erase</span></div>
       <div className="piano-scroll">
         <div className="piano-grid" style={{ '--rows': project.rows } as React.CSSProperties}>
-          {pitches.map((note) => <div className="piano-line" key={note}><span className={note.includes('#') ? 'black-key' : ''}>{note}</span><div className="piano-cells">{Array.from({ length: project.rows }, (_, row) => <button key={row} aria-label={`${note} at row ${row}`} className={`${notesByRow.get(row) === note ? 'placed' : ''} ${selectedRow === row ? 'selected-column' : ''}`} onClick={() => onSetNote(channelId, row, notesByRow.get(row) === note ? null : note)} />)}</div></div>)}
+          {pitches.map((note) => <div className="piano-line" key={note}><span className={note.includes('#') ? 'black-key' : ''}>{note}</span><div className="piano-cells">{Array.from({ length: project.rows }, (_, row) => <button key={row} disabled={!editing} aria-label={`${note} at row ${row}`} className={`${notesByRow.get(row) === note ? 'placed' : ''} ${selectedRow === row ? 'selected-column' : ''}`} onClick={() => onSetNote(channelId, row, notesByRow.get(row) === note ? null : note)} />)}</div></div>)}
         </div>
       </div>
     </div>
@@ -375,10 +444,10 @@ function AboutDialog({ onClose }: { onClose: () => void }) {
       <section className="about-dialog" role="dialog" aria-modal="true" aria-labelledby="about-title" onMouseDown={(event) => event.stopPropagation()}>
         <button className="dialog-close" onClick={onClose} aria-label="Close">×</button>
         <p className="eyebrow">Recovery notes</p>
-        <h2 id="about-title">The audio survived.<br />The patterns haven’t—yet.</h2>
-        <p>YouTube stores the finished mix, not FamiTracker’s notes, channels, instruments, effects, or frame order. Reverse-engineering a mixed recording into an “original FTM” would be guesswork.</p>
-        <p>Chipvault keeps those facts separate: the source audio is authentic; each editable module is a clearly labelled recovery draft. Import a recovered FamiTracker text module at any time, or transcribe against the recording using the tracker and piano roll.</p>
-        <div className="dialog-facts"><div><strong>17</strong><span>music recordings</span></div><div><strong>8</strong><span>NES + VRC6 channels</span></div><div><strong>0</strong><span>fake “original” modules</span></div></div>
+        <h2 id="about-title">The audio survived.<br />The visible patterns can too.</h2>
+        <p>YouTube stores the finished mix rather than an FTM file, but these uploads also recorded the FamiTracker grid. Chipvault can transcribe visible notes, instruments, effects, and order boundaries from those frames.</p>
+        <p>Hidden instrument macros still have to be reconstructed and every result is confidence-labelled. Game Complete Loop is the first synchronized recovery; the remaining recordings stay honest blank drafts until their video frames are decoded.</p>
+        <div className="dialog-facts"><div><strong>17</strong><span>music recordings</span></div><div><strong>8</strong><span>NES + VRC6 channels</span></div><div><strong>1</strong><span>synchronized recovery</span></div></div>
         <button className="primary-action dialog-action" onClick={onClose}>Back to the editor</button>
       </section>
     </div>
