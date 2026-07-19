@@ -749,7 +749,7 @@ function App() {
 
   const exportFami = () => {
     downloadText(filename(project.title, 'famitracker.txt'), exportFamiTrackerText(project), 'text/plain')
-    setMessage('Downloaded FamiTracker text module')
+    setMessage('Downloaded FamiTracker module · use File → Import text…')
   }
 
   const handleReferencePlaying = () => {
@@ -947,7 +947,7 @@ function App() {
             {selectedTrack.credit && <p className="credit">{selectedTrack.credit}</p>}
             <div className="workspace-mode viewer-only" aria-label="Workspace mode">
               <div className="viewer-mode"><span>View only</span><small>clean archive playback</small></div>
-              <details className="export-menu mode-export"><summary>Download</summary><div><button onClick={exportNative}>Clean pattern JSON</button><button onClick={exportFami}>FamiTracker TXT</button>{selectedTrack.audio && <a href={asset(selectedTrack.audio)} download={`${selectedTrack.slug}.m4a`}>Source audio M4A</a>}</div></details>
+              <details className="export-menu mode-export"><summary>Download</summary><div><button onClick={exportNative}>Clean pattern JSON</button><button onClick={exportFami}>FamiTracker TXT · Import text…</button>{selectedTrack.audio && <a href={asset(selectedTrack.audio)} download={`${selectedTrack.slug}.m4a`}>Source audio M4A</a>}</div></details>
             </div>
             {selectedTrack.audio && <div className="source-player">
               <audio ref={audioRef} key={selectedTrack.id} src={asset(selectedTrack.audio)} controls preload="auto" playsInline onPlaying={handleReferencePlaying} onPause={handleReferencePause} onWaiting={handleReferenceWaiting} onStalled={handleReferenceWaiting} onEnded={handleReferenceEnded} onError={handleReferenceError} onTimeUpdate={syncReference} />

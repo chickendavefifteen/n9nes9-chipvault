@@ -88,7 +88,9 @@ function famiNote(cell: TrackerCell, channelId: ChannelId): string {
 }
 
 export function exportFamiTrackerText(project: TrackerProject): string {
-  const expansion = channels.some((channel) => channel.id.startsWith('vrc6') && project.cells[channel.id].some((cell) => cell.note)) ? 1 : 0
+  const sourceUsesVrc6 = library.find((track) => track.id === project.sourceId)?.expansion === 'VRC6'
+  const hasVrc6Data = channels.some((channel) => channel.id.startsWith('vrc6') && project.cells[channel.id].some((cell) => cell.note || cell.effect))
+  const expansion = sourceUsesVrc6 || hasVrc6Data ? 1 : 0
   const activeChannels = expansion ? channelIds : channelIds.slice(0, 5)
   const lines = [
     '# FamiTracker text export 0.4.6',
@@ -103,7 +105,8 @@ export function exportFamiTrackerText(project: TrackerProject): string {
     `EXPANSION ${expansion}`,
     'VIBRATO 1',
     'SPLIT 32',
-    'N163CHANNELS 0',
+    // FamiTracker 0.4.6 validates this field as 1..8 even without N163 enabled.
+    'N163CHANNELS 1',
     '',
     'MACRO 0 0 -1 0 0 : 15 14 13 12 11 10 9 8 7 6 5 4 3 2 1 0',
     'MACROVRC6 0 0 -1 0 0 : 15 14 13 12 11 10 9 8 7 6 5 4 3 2 1 0',

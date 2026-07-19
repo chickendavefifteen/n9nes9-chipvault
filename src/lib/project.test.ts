@@ -84,13 +84,13 @@ describe('Chipvault project interchange', () => {
     expect(BUILD_ID).toMatch(/^\d{4}-\d{2}-\d{2}\.\d+$/)
     expect(shouldReloadBuild(BUILD_ID)).toBe(false)
     expect(shouldReloadBuild('2026-07-18.5')).toBe(false)
-    expect(shouldReloadBuild('2026-07-18.12')).toBe(true)
+    expect(shouldReloadBuild('2026-07-18.13')).toBe(true)
     expect(shouldReloadBuild('broken')).toBe(false)
     expect(isNewerBuild('2026-07-18.6', '2026-07-18.5')).toBe(true)
-    expect(buildUpdateAction('2026-07-18.12', { playbackActive: false, editing: false, storageHealthy: true })).toBe('reload')
-    expect(buildUpdateAction('2026-07-18.12', { playbackActive: true, editing: false, storageHealthy: true })).toBe('notify')
-    expect(buildUpdateAction('2026-07-18.12', { playbackActive: false, editing: true, storageHealthy: true })).toBe('notify')
-    expect(buildUpdateAction('2026-07-18.12', { playbackActive: false, editing: false, storageHealthy: false })).toBe('notify')
+    expect(buildUpdateAction('2026-07-18.13', { playbackActive: false, editing: false, storageHealthy: true })).toBe('reload')
+    expect(buildUpdateAction('2026-07-18.13', { playbackActive: true, editing: false, storageHealthy: true })).toBe('notify')
+    expect(buildUpdateAction('2026-07-18.13', { playbackActive: false, editing: true, storageHealthy: true })).toBe('notify')
+    expect(buildUpdateAction('2026-07-18.13', { playbackActive: false, editing: false, storageHealthy: false })).toBe('notify')
   })
 
   it('exports the required FamiTracker 0.4.6 text sections', () => {
@@ -99,9 +99,30 @@ describe('Chipvault project interchange', () => {
     const output = exportFamiTrackerText(project)
     expect(output).toContain('# FamiTracker text export 0.4.6')
     expect(output).toContain('EXPANSION 1')
+    expect(output).toContain('N163CHANNELS 1')
     expect(output).toContain('TRACK 64 6 150')
     expect(output).toContain('ROW 04')
     expect(output).toContain('A-2 01 .')
+  })
+
+  it('exports every shipped track as a directly importable FamiTracker 0.4.6 text module', () => {
+    for (const track of library) {
+      const project = recoveredProjectForTrack(track)!
+      const output = exportFamiTrackerText(project)
+      const expectedChannels = track.expansion === 'VRC6' ? 8 : 5
+      const columnLine = output.match(/^COLUMNS\s*:\s*(.*)$/m)?.[1].trim().split(/\s+/) ?? []
+      const rowLines = output.match(/^ROW\s+[0-9A-F]{2}\s+:.*$/gm) ?? []
+      const exportedNotes = rowLines.filter((line) => /(?:^|\s)[A-G][#-][0-9](?:\s|$)/.test(line))
+
+      expect(output, track.shortTitle).toContain('N163CHANNELS 1')
+      expect(output, track.shortTitle).toContain(`EXPANSION ${track.expansion === 'VRC6' ? 1 : 0}`)
+      expect(columnLine, track.shortTitle).toHaveLength(expectedChannels)
+      expect(rowLines.length, track.shortTitle).toBeGreaterThan(0)
+      expect(exportedNotes.length, track.shortTitle).toBeGreaterThan(0)
+      for (const line of rowLines) {
+        expect(line.split(':').length - 1, `${track.shortTitle}: ${line}`).toBe(expectedChannels)
+      }
+    }
   })
 
   it('re-imports the module text it exports', () => {

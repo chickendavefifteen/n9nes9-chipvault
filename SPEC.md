@@ -57,6 +57,7 @@ A static, offline-capable archive and modern browser tracker for the music uploa
 - R36: The standalone browser fallback must synthesize audible DPCM/sample-channel percussion instead of silently discarding those cells.
 - R37: Until editing is deliberately re-enabled, the public site is viewer-only and this requirement supersedes the editing portions of R4, R5, R14, R18, and R29–R36. It must not render Edit, Save, import, reset, undo/redo, note-entry, effect, volume, tempo, speed, loop-editing, or edited-preview controls.
 - R38: Viewer-only boot must ignore and remove only Chipvault's legacy per-track local project keys, always load the shipped clean baseline, and allow a newer build to reload even when browser storage is unavailable. Playback coordination state and unrelated storage must remain untouched.
+- R39: Every FamiTracker download must use the 0.4.6 text-import contract, declare the track's VRC6 expansion even when a channel is sparse, use an importer-valid N163 channel count, contain the expected channel columns and populated note rows, and label the required `File → Import text…` workflow.
 
 ## Acceptance checks
 
@@ -95,6 +96,7 @@ A static, offline-capable archive and modern browser tracker for the music uploa
 - C33: Unit tests prove row-to-source-time inversion, tempo-aligned source playback rate, and an audible DPCM/sample trigger in the standalone fallback.
 - C34: A previously used browser profile and a clean navigation both show `viewer-only`, contain no edit/save/import controls or edited cells, load the shipped baseline, play archived tracks through `source-playing`, and retain pattern, FamiTracker, and source-audio downloads.
 - C35: Unit tests prove legacy Chipvault project keys are removed without reading their values or removing unrelated keys; production build, repeated reloads, historical-asset checks, and the live Pages URL all report the current viewer-only build.
+- C36: An all-library test validates expansion, N163 channel range, column count, row width, and populated note data for every exported module; the downloaded live file then imports into stock FamiTracker 0.4.6 without a parser error.
 
 ## Out of scope for this recovery pass
 
