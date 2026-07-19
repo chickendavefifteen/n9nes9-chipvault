@@ -10,11 +10,10 @@ import {
   importFamiTrackerText,
   midiToNote,
   parseProject,
-  preferShippedBaseline,
   serializeProject,
 } from './lib/project'
 import { buildUpdateAction, BUILD_ID, fetchBuildManifest } from './lib/versioning'
-import { browserStorage, safeStorageGet, safeStorageSet } from './lib/reliability'
+import { browserStorage, clearStorageKeys, safeStorageSet } from './lib/reliability'
 import { cellKey, rectangularSelection, selectionBounds, type GridPoint, type GridSelection } from './lib/selection'
 import {
   createPlaybackSignal,
@@ -37,6 +36,7 @@ type ChipPurpose = 'preview' | 'fallback' | 'layered'
 type SaveStatus = 'dirty' | 'saved' | 'temporary'
 
 const engine = new ChipAudioEngine()
+const EDITING_ENABLED = false
 const LAYERED_BACKING_VOLUME = 0.88
 const LAYERED_EDIT_DUCK_VOLUME = 0.46
 const trackerChannelIds = channels.map((channel) => channel.id)
@@ -58,14 +58,7 @@ function configureReferenceAudio(audio: HTMLAudioElement, volume = 1, playbackRa
 
 function loadProject(track: LibraryTrack): TrackerProject {
   const recovered = recoveredProjectForTrack(track)
-  const stored = safeStorageGet(browserStorage(), storageKey(track.id))
-  if (!stored) return recovered ?? createDraft(track)
-  try {
-    const saved = parseProject(stored)
-    return preferShippedBaseline(saved, recovered)
-  } catch {
-    return recovered ?? createDraft(track)
-  }
+  return recovered ?? createDraft(track)
 }
 
 function filename(title: string, extension: string): string {
@@ -89,7 +82,10 @@ function App() {
   const initialTrack = library.find((track) => `#${track.slug}` === window.location.hash) ?? defaultTrack
   const [selectedId, setSelectedId] = useState(initialTrack.id)
   const selectedTrack = library.find((track) => track.id === selectedId) ?? library[0]
-  const [project, setProject] = useState(() => loadProject(initialTrack))
+  const [project, setProject] = useState(() => {
+    clearStorageKeys(browserStorage(), library.map((track) => storageKey(track.id)))
+    return loadProject(initialTrack)
+  })
   const [undoStack, setUndoStack] = useState<TrackerProject[]>([])
   const [redoStack, setRedoStack] = useState<TrackerProject[]>([])
   const [view, setView] = useState<ViewMode>('tracker')
@@ -163,10 +159,10 @@ function App() {
     : referenceActive
       ? 'original recording'
       : playing
-        ? 'edited chip preview'
+        ? 'browser pattern playback'
         : previewMode === 'chip'
-          ? hasLayeredPreview ? 'layered edit mix' : 'edited chip preview'
-          : selectedTrack.audio ? 'original recording' : 'edited chip preview'
+          ? hasLayeredPreview ? 'layered edit mix' : 'browser pattern playback'
+          : selectedTrack.audio ? 'original recording' : 'browser pattern playback'
   const editedStartLabel = lastEditedRow === null ? null : `${Math.floor(lastEditedRow / project.patternLength).toString(16).padStart(2, '0').toUpperCase()}:${(lastEditedRow % project.patternLength).toString(16).padStart(2, '0').toUpperCase()}`
   const savedTime = lastSavedAt === null ? null : new Date(lastSavedAt).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', second: '2-digit' })
   const saveText = saveStatus === 'temporary'
@@ -349,7 +345,7 @@ function App() {
     setPlayhead(Math.floor(sourceRowPosition(audio.currentTime, project.sourceSync, project.tempo, project.rows)))
   }, [project.rows, project.sourceSync, project.tempo])
 
-  const startChip = useCallback((nextMessage = 'Playing edited chip preview', purpose: ChipPurpose = 'preview') => {
+  const startChip = useCallback((nextMessage = 'Playing browser pattern', purpose: ChipPurpose = 'preview') => {
     stopChip()
     pauseReference()
     broadcastPlayback()
@@ -405,7 +401,7 @@ function App() {
         paused: audio.paused,
         readyState: audio.readyState,
       })) {
-        startChip('Source audio stalled — edited chip fallback active', 'fallback')
+        startChip('Source audio stalled — browser pattern fallback active', 'fallback')
         return
       }
       setReferenceStarting(false)
@@ -483,7 +479,7 @@ function App() {
   const beginSourcePlayback = useCallback((looping = false) => {
     const audio = audioRef.current
     if (!audio) {
-      startChip('Source audio unavailable — edited chip fallback active', 'fallback')
+      startChip('Source audio unavailable — browser pattern fallback active', 'fallback')
       return
     }
     stopChip()
@@ -505,10 +501,10 @@ function App() {
       void Promise.resolve(audio.play()).then(() => {
         if (sourceAttemptRef.current === attempt) armSourceWatchdog(attempt, initialTime)
       }).catch(() => {
-        if (sourceAttemptRef.current === attempt) startChip('Source audio was blocked — edited chip fallback active', 'fallback')
+        if (sourceAttemptRef.current === attempt) startChip('Source audio was blocked — browser pattern fallback active', 'fallback')
       })
     } catch {
-      if (sourceAttemptRef.current === attempt) startChip('Source audio was blocked — edited chip fallback active', 'fallback')
+      if (sourceAttemptRef.current === attempt) startChip('Source audio was blocked — browser pattern fallback active', 'fallback')
     }
   }, [armSourceWatchdog, broadcastPlayback, clearSourceWatchdog, project.sourceSync, startChip, stopChip])
 
@@ -577,8 +573,8 @@ function App() {
       if (disposed) return
       const action = buildUpdateAction(manifest?.build, {
         playbackActive: playbackActiveRef.current,
-        editing: editingRef.current,
-        storageHealthy: storageHealthyRef.current,
+        editing: false,
+        storageHealthy: true,
       })
       if (action === 'reload' && manifest?.build) {
         const url = new URL(window.location.href)
@@ -748,7 +744,7 @@ function App() {
 
   const exportNative = () => {
     downloadText(filename(project.title, 'chipvault.json'), serializeProject(project), 'application/json')
-    setMessage('Downloaded editable project')
+    setMessage('Downloaded clean pattern project')
   }
 
   const exportFami = () => {
@@ -809,7 +805,7 @@ function App() {
   }
 
   const handleReferenceError = () => {
-    if (referenceActive || chipPurposeRef.current === 'layered') startChip('Source audio failed — full chip fallback active', 'fallback')
+    if (referenceActive || chipPurposeRef.current === 'layered') startChip('Source audio failed — browser pattern fallback active', 'fallback')
     else setMessage('Source recording could not load in this browser')
   }
 
@@ -821,7 +817,7 @@ function App() {
     }
     if (previewMode === 'source' && audioRef.current) beginSourcePlayback()
     else if (hasLayeredPreview) startLayeredPreview()
-    else startChip(selectedTrack.kind === 'bonus' ? 'Playing editable chiptune arrangement' : 'Playing edited chip preview')
+    else startChip(selectedTrack.kind === 'bonus' ? 'Playing browser chiptune arrangement' : 'Playing browser pattern')
   }
 
   const setEditMode = (next: boolean) => {
@@ -904,13 +900,13 @@ function App() {
   }
 
   return (
-    <div className="app-shell">
+    <div className="app-shell" data-release-mode="viewer-only">
       <header className="topbar">
         <a className="brand" href="#top" aria-label="N9NES9 Chipvault home">
           <span className="brand-mark" aria-hidden="true"><i /><i /><i /><i /></span>
           <span><b>N9NES9</b><em>CHIPVAULT</em></span>
         </a>
-        <div className="topbar-status"><span className="live-dot" /> Online tracker · 18 editable patterns</div>
+        <div className="topbar-status"><span className="live-dot" /> View-only archive · 18 clean patterns</div>
         <button className="ghost-button" onClick={() => setAboutOpen(true)}>About the recovery</button>
       </header>
 
@@ -949,10 +945,9 @@ function App() {
             <h2>{selectedTrack.shortTitle}</h2>
             <p>{selectedTrack.description}</p>
             {selectedTrack.credit && <p className="credit">{selectedTrack.credit}</p>}
-            <div className="workspace-mode" aria-label="Workspace mode">
-              <button className={!editing ? 'active' : ''} onClick={() => setEditMode(false)}><span>Play</span><small>saved pattern</small></button>
-              <button className={editing ? 'active' : ''} onClick={() => setEditMode(true)}><span>Edit</span><small>drag + draw</small></button>
-              <details className="export-menu mode-export"><summary>Export</summary><div><button onClick={exportNative}>Chipvault JSON</button><button onClick={exportFami}>FamiTracker TXT</button>{selectedTrack.audio && <a href={asset(selectedTrack.audio)} download={`${selectedTrack.slug}.m4a`}>Source audio M4A</a>}<button onClick={() => importRef.current?.click()}>Import project</button>{editing && <button className="danger-action" onClick={reset}>Reset edits</button>}</div></details>
+            <div className="workspace-mode viewer-only" aria-label="Workspace mode">
+              <div className="viewer-mode"><span>View only</span><small>clean archive playback</small></div>
+              <details className="export-menu mode-export"><summary>Download</summary><div><button onClick={exportNative}>Clean pattern JSON</button><button onClick={exportFami}>FamiTracker TXT</button>{selectedTrack.audio && <a href={asset(selectedTrack.audio)} download={`${selectedTrack.slug}.m4a`}>Source audio M4A</a>}</div></details>
             </div>
             {selectedTrack.audio && <div className="source-player">
               <audio ref={audioRef} key={selectedTrack.id} src={asset(selectedTrack.audio)} controls preload="auto" playsInline onPlaying={handleReferencePlaying} onPause={handleReferencePause} onWaiting={handleReferenceWaiting} onStalled={handleReferenceWaiting} onEnded={handleReferenceEnded} onError={handleReferenceError} onTimeUpdate={syncReference} />
@@ -962,81 +957,52 @@ function App() {
           </div>
         </section>
 
-        {!storageHealthy && <section className="storage-warning" role="status"><strong>Temporary browser session</strong><span>This browser blocked local storage. The editor still works, but export Chipvault JSON before closing the tab if you want to keep changes.</span></section>}
-
         <section className={`recovery-banner ${project.recoveryStatus}`}>
           <span className="warning-icon" aria-hidden="true">!</span>
           {project.recoveryStatus === 'pattern-recovered' ? (
             <div><strong>Animated pattern recovered from the video · {Math.round((project.sourceSync?.confidence ?? 0) * 100)}% transcription confidence</strong><p>{project.rows / project.patternLength} visible FamiTracker orders are synchronised to the original recording. Hidden instrument envelopes remain reconstructed, not original.</p></div>
           ) : project.recoveryStatus === 'audio-transcribed' ? (
-            <div><strong>Audio-derived editable pattern · {Math.round((project.sourceSync?.confidence ?? 0) * 100)}% pitch confidence</strong><p>Dominant notes, bass, harmony, and rhythm were extracted from the preserved mix. It is populated and playable, but it is not claimed to be the lost original channel data.</p></div>
+            <div><strong>Audio-derived pattern view · {Math.round((project.sourceSync?.confidence ?? 0) * 100)}% pitch confidence</strong><p>Dominant notes, bass, harmony, and rhythm were extracted from the preserved mix. It is populated for viewing, but it is not claimed to be the lost original channel data.</p></div>
           ) : project.recoveryStatus === 'arranged-cover' ? (
-            <div><strong>Editable VRC6-style chiptune arrangement · ten-minute session</strong><p>The recognizable sax riff, harmony, bass, and drums are synthesized by the browser tracker and loop as editable pattern data.</p></div>
+            <div><strong>VRC6-style chiptune arrangement · ten-minute session</strong><p>The recognizable sax riff, harmony, bass, and drums are synthesized by the browser tracker and shown as clean pattern data.</p></div>
           ) : (
-            <div><strong>Recovery draft — original module not yet found</strong><p>The recording is authentic. Pattern data starts blank until transcribed or an original FTM is imported. Save keeps edits locally in this browser; export is optional.</p></div>
+            <div><strong>Recovery draft — original module not yet found</strong><p>The recording is authentic. Pattern data remains view-only until an original FTM is recovered.</p></div>
           )}
           <button onClick={() => setAboutOpen(true)}>Why?</button>
         </section>
 
-        <section className="workbench" data-transport={transportMode} data-preview={previewMode === 'chip' && hasLayeredPreview ? 'layered' : previewMode} data-backing-active={chipPurpose === 'layered' && referencePlaying ? 'true' : 'false'}>
+        <section className="workbench" data-transport={transportMode} data-preview={previewMode} data-backing-active="false" data-mode="viewer-only">
           <div className="transport-bar">
             <div className="transport-buttons">
               <button className="play-button" onClick={toggleTransport} aria-label={playbackActive ? `Pause ${playbackName}` : `Play ${playbackName}`} title={playbackActive ? `Pause ${playbackName}` : `Play ${playbackName}`}>{playbackActive ? '■' : '▶'}</button>
               <button onClick={returnToStart} aria-label="Return to first row">↤</button>
             </div>
-            <label>BPM<input type="number" min="32" max="300" disabled={!editing} value={project.tempo} onChange={(event) => commitPreviewEdit((draft) => { draft.tempo = Number(event.target.value) }, selectedRow, 'Tempo changed')} /></label>
-            <label>Speed<input type="number" min="1" max="31" disabled={!editing} value={project.speed} onChange={(event) => commitPreviewEdit((draft) => { draft.speed = Number(event.target.value) }, selectedRow, 'Speed changed')} /></label>
-            <label className="loop-control"><input type="checkbox" disabled={!editing} checked={project.loop} onChange={(event) => commitPreviewEdit((draft) => { draft.loop = event.target.checked }, selectedRow, 'Loop setting changed')} /> Loop</label>
+            <span className="transport-readout">{project.tempo} BPM</span>
+            <span className="transport-readout">Speed {project.speed}</span>
+            <span className="transport-readout">{project.loop ? 'Loop on' : 'One pass'}</span>
             <div className="transport-spacer" />
-            <button onClick={undo} disabled={!undoStack.length} title="Undo">↶</button>
-            <button onClick={redo} disabled={!redoStack.length} title="Redo">↷</button>
-            <span className={`save-state ${editedCount ? 'has-edits' : ''} ${saveStatus}`} role="status" aria-live="polite" title="Projects are stored only in this browser on this device. Export is optional."><i /> {saveText}</span>
+            <span className="viewer-release"><i /> View only · clean shipped pattern</span>
           </div>
 
-          {(editing || hasEditedPreview) && <div className={`edit-session-bar ${editing ? '' : 'play-session'}`}>
-            <div className="preview-switch" role="group" aria-label="Playback preview">
-              <button className={previewMode === 'source' ? 'active' : ''} disabled={!selectedTrack.audio} onClick={() => choosePreview('source')}><span>Original mix</span><small>{selectedTrack.audio ? 'authentic recording' : 'unavailable'}</small></button>
-              <button className={previewMode === 'chip' ? 'active' : ''} onClick={() => choosePreview('chip')}><span>{hasLayeredPreview ? 'Layered edit mix' : 'Edited preview'}</span><small>{editedStartLabel ? `next Play · ${editedStartLabel}` : 'browser chiptune'}</small></button>
-            </div>
-            <p>{previewMode === 'source'
-              ? <><strong>Original recording</strong><span>Your local edits stay on the grid. Choose Layered edit mix to hear them over the authentic recording.</span></>
-              : hasLayeredPreview
-                ? <><strong>{editedStartLabel ? `Layered edit mix · ${editedStartLabel}` : 'Layered edit mix'}</strong><span>Original effects, drums, and mix stay underneath; only browser-authored cells are overlaid and the backing ducks briefly on edited rows.</span></>
-                : <><strong>{editedStartLabel ? `Edited preview · ${editedStartLabel}` : 'Approximate edited sound'}</strong><span>{editing && saveStatus === 'dirty' ? 'You are hearing the working copy. Save before returning to Play.' : 'Play uses the pattern saved locally in this browser.'}</span></>}</p>
-            {editing ? <div className={`edit-save-card ${saveStatus}`} role="status" aria-live="polite"><i /><span><strong>{saveStatus === 'temporary' ? 'Save blocked' : saveStatus === 'dirty' ? 'Unsaved changes' : 'Saved locally'}</strong><small>{saveStatus === 'temporary' ? 'Export JSON before closing' : saveStatus === 'dirty' ? `${editedCount} edit${editedCount === 1 ? '' : 's'} · not written yet` : savedTime ? `This browser · ${savedTime}` : 'No unsaved changes'}</small></span><button className="save-button" onClick={saveWorkspace}>Save &amp; go to Play</button></div> : <div className="play-mode-chip"><strong>Local project</strong><small>{previewMode === 'chip' ? hasLayeredPreview ? 'layered edit mix active' : 'edited pattern active' : 'original mix active'}</small></div>}
-          </div>}
-
           <div className="editor-tabs">
-            <div role="tablist" aria-label="Editor view">
+            <div role="tablist" aria-label="Pattern view">
               <button role="tab" aria-selected={view === 'tracker'} className={view === 'tracker' ? 'active' : ''} onClick={() => setEditorView('tracker')}>Tracker</button>
               <button role="tab" aria-selected={view === 'piano'} className={view === 'piano' ? 'active' : ''} onClick={() => setEditorView('piano')}>Piano roll</button>
             </div>
-            <div className="octave-control"><button onClick={() => setOctave(Math.max(1, octave - 1))}>−</button><span>Oct {octave}</span><button onClick={() => setOctave(Math.min(7, octave + 1))}>+</button></div>
           </div>
 
           {view === 'tracker' ? (
-            <TrackerGrid project={project} playhead={playhead} referenceAudioRef={audioRef} referenceActive={referenceActive} chipPlaying={playing} selectedChannel={selectedChannel} selectedRow={selectedRow} selectedCellKeys={selectedCellKeys} muted={muted} editing={editing} onMute={(id) => setMuted((current) => { const next = new Set(current); next.has(id) ? next.delete(id) : next.add(id); return next })} onSelectionStart={beginCellSelection} onSelectionMove={extendCellSelection} onSelectionEnd={endCellSelection} onClearSelection={() => setSelectionNote(null)} />
+            <TrackerGrid project={project} playhead={playhead} referenceAudioRef={audioRef} referenceActive={referenceActive} chipPlaying={playing} selectedChannel={selectedChannel} selectedRow={selectedRow} selectedCellKeys={selectedCellKeys} muted={muted} editing={EDITING_ENABLED} onMute={(id) => setMuted((current) => { const next = new Set(current); next.has(id) ? next.delete(id) : next.add(id); return next })} onSelectionStart={beginCellSelection} onSelectionMove={extendCellSelection} onSelectionEnd={endCellSelection} onClearSelection={() => undefined} />
           ) : (
-            <PianoRoll project={project} channelId={selectedChannel} selectedRow={selectedRow} editing={editing} onChannel={setSelectedChannel} onSetNote={setNote} />
+            <PianoRoll project={project} channelId={selectedChannel} selectedRow={selectedRow} editing={EDITING_ENABLED} onChannel={setSelectedChannel} onSetNote={() => undefined} />
           )}
 
-          <div className={`entry-strip ${editing ? '' : 'viewing'}`}>
-            <div><span className="eyebrow">Grid selection</span><strong>{editing ? selectionSummary : `${channels.find((channel) => channel.id === selectedChannel)?.name} · row ${selectedRow.toString(16).padStart(2, '0').toUpperCase()}`}</strong></div>
-            {editing ? <><div className="note-keys" aria-label="Quick note entry">
-              {Array.from({ length: 12 }, (_, index) => midiToNote((octave + 1) * 12 + index)).map((note) => (
-                <button key={note} className={note.includes('#') ? 'sharp' : ''} onClick={() => setSelectionNote(note)} title={`Fill ${selectedTargets.length} selected cell${selectedTargets.length === 1 ? '' : 's'} with ${note}`}>{note}</button>
-              ))}
-              <button className="clear-note" onClick={() => setSelectionNote(null)}>Delete selected</button>
-            </div>
-            <div className="cell-inspector">
-              <label>Volume <input type="range" min="0" max="15" value={selectedCell.volume ?? 15} onChange={(event) => editSelection((cell) => { cell.volume = Number(event.target.value) }, 'Volume changed')} /><output>{(selectedCell.volume ?? 15).toString(16).toUpperCase()}</output></label>
-              <label>Effect <input aria-label="Effect command" value={selectedCell.effect} maxLength={3} placeholder="0xy" onChange={(event) => { const value = event.target.value.toUpperCase().replace(/[^0-9A-FP-Z]/g, '').slice(0, 3); editSelection((cell) => { cell.effect = value }, 'Effect changed') }} /></label>
-            </div>
-            <p><kbd>Drag</kbd> select a rectangle · <kbd>A–K</kbd> fill notes · <kbd>Del</kbd> delete selected · <kbd>Z/X</kbd> octave · <kbd>Space</kbd> play</p></> : <div className="view-mode-copy"><strong>Fixed playhead · moving pattern</strong><span>Press Play to follow the saved edited grid or choose the original recording above.</span></div>}
+          <div className="entry-strip viewing">
+            <div><span className="eyebrow">Pattern viewer</span><strong>{channels.find((channel) => channel.id === selectedChannel)?.name} · row {selectedRow.toString(16).padStart(2, '0').toUpperCase()}</strong></div>
+            <div className="view-mode-copy"><strong>Fixed playhead · moving clean pattern</strong><span>Editing and local project memory are temporarily disabled. Archived tracks play only their preserved recording.</span></div>
           </div>
         </section>
-        <input ref={importRef} type="file" accept=".json,.txt" hidden onChange={(event) => { const file = event.target.files?.[0]; if (file) void onImport(file); event.target.value = '' }} />
-        <footer><span>{message}</span><span>Build {BUILD_ID} · no analytics · data stays local</span></footer>
+        <footer><span>{message}</span><span>View-only build {BUILD_ID} · no local project memory</span></footer>
       </main>
 
       {aboutOpen && <AboutDialog onClose={() => setAboutOpen(false)} />}
@@ -1148,7 +1114,7 @@ function PianoRoll({ project, channelId, selectedRow, editing, onChannel, onSetN
   }, []))
   return (
     <div className="piano-editor">
-      <div className="piano-toolbar"><label>Editing<select value={channelId} onChange={(event) => onChannel(event.target.value as ChannelId)}>{channels.map((channel) => <option value={channel.id} key={channel.id}>{channel.name}</option>)}</select></label><span>Click to draw · click again to erase</span></div>
+      <div className="piano-toolbar"><label>Channel<select value={channelId} onChange={(event) => onChannel(event.target.value as ChannelId)}>{channels.map((channel) => <option value={channel.id} key={channel.id}>{channel.name}</option>)}</select></label><span>View only · clean shipped pattern</span></div>
       <div className="piano-scroll">
         <div className="piano-grid" style={{ '--rows': project.rows } as React.CSSProperties}>
           {pitches.map((note) => <div className="piano-line" key={note}><span className={note.includes('#') ? 'black-key' : ''}>{note}</span><div className="piano-cells">{Array.from({ length: project.rows }, (_, row) => <button key={row} disabled={!editing} aria-label={`${note} at row ${row}${editedRows.has(row) ? ', user edited' : ''}`} className={`${notesByRow.get(row) === note ? 'placed' : ''} ${selectedRow === row ? 'selected-column' : ''} ${editedRows.has(row) ? 'user-edited' : ''}`} onClick={() => onSetNote(channelId, row, notesByRow.get(row) === note ? null : note)} />)}</div></div>)}
@@ -1167,8 +1133,8 @@ function AboutDialog({ onClose }: { onClose: () => void }) {
         <h2 id="about-title">The audio survived.<br />The visible patterns can too.</h2>
         <p>YouTube stores the finished mix rather than an FTM file, but these uploads also recorded the FamiTracker grid. Chipvault can transcribe visible notes, instruments, effects, and order boundaries from those frames.</p>
         <p>Hidden instrument macros still have to be reconstructed and every result is confidence-labelled. Game Complete Loop retains its frame-recovered data; the other preserved mixes now open populated audio-derived drafts instead of blank grids.</p>
-        <div className="dialog-facts"><div><strong>18</strong><span>editable patterns</span></div><div><strong>8</strong><span>NES + VRC6 channels</span></div><div><strong>0</strong><span>blank track baselines</span></div></div>
-        <button className="primary-action dialog-action" onClick={onClose}>Back to the editor</button>
+        <div className="dialog-facts"><div><strong>18</strong><span>pattern views</span></div><div><strong>8</strong><span>NES + VRC6 channels</span></div><div><strong>0</strong><span>blank track baselines</span></div></div>
+        <button className="primary-action dialog-action" onClick={onClose}>Back to the archive</button>
       </section>
     </div>
   )

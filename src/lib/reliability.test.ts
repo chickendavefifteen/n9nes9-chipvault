@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { extractHashedAssetRefs, missingAssetRefs, safeStorageGet, safeStorageSet, type StorageAdapter } from './reliability'
+import { clearStorageKeys, extractHashedAssetRefs, missingAssetRefs, safeStorageGet, safeStorageRemove, safeStorageSet, type StorageAdapter } from './reliability'
 
 describe('production reliability', () => {
   it('contains browsers that deny local storage', () => {
@@ -20,6 +20,20 @@ describe('production reliability', () => {
     }
     expect(safeStorageSet(storage, 'project', '{"ok":true}')).toBe(true)
     expect(safeStorageGet(storage, 'project')).toBe('{"ok":true}')
+  })
+
+  it('clears legacy editable projects without exposing their contents', () => {
+    const values = new Map([['project:a', 'old edit'], ['project:b', 'old edit'], ['unrelated', 'keep']])
+    const storage: StorageAdapter = {
+      getItem: (key) => values.get(key) ?? null,
+      setItem: (key, value) => { values.set(key, value) },
+      removeItem: (key) => { values.delete(key) },
+    }
+    expect(clearStorageKeys(storage, ['project:a', 'project:b'])).toBe(2)
+    expect(values.has('project:a')).toBe(false)
+    expect(values.has('project:b')).toBe(false)
+    expect(values.get('unrelated')).toBe('keep')
+    expect(safeStorageRemove(null, 'project:a')).toBe(false)
   })
 
   it('extracts both stale and current Vite assets from cached HTML', () => {

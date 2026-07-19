@@ -1,6 +1,7 @@
 export interface StorageAdapter {
   getItem(key: string): string | null
   setItem(key: string, value: string): void
+  removeItem?(key: string): void
 }
 
 export function safeStorageGet(storage: StorageAdapter | null | undefined, key: string): string | null {
@@ -19,6 +20,24 @@ export function safeStorageSet(storage: StorageAdapter | null | undefined, key: 
   } catch {
     return false
   }
+}
+
+export function safeStorageRemove(storage: StorageAdapter | null | undefined, key: string): boolean {
+  try {
+    if (!storage?.removeItem) return false
+    storage.removeItem(key)
+    return true
+  } catch {
+    return false
+  }
+}
+
+export function clearStorageKeys(storage: StorageAdapter | null | undefined, keys: Iterable<string>): number {
+  let removed = 0
+  for (const key of keys) {
+    if (safeStorageRemove(storage, key)) removed += 1
+  }
+  return removed
 }
 
 export function browserStorage(): StorageAdapter | null {

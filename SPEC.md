@@ -55,6 +55,8 @@ A static, offline-capable archive and modern browser tracker for the music uploa
 - R34: In the tracker, a mouse drag must select an inclusive rectangular range across rows and channels. Note entry, volume/effect changes, Delete/Backspace, and the visible Delete selected action must apply to the whole range as one undoable edit.
 - R35: Edited playback for a preserved recording must retain the authentic recording as a synchronized backing layer and synthesize only browser-authored cells over it in both Edit and saved Play. The backing may duck only on edited rows so changed and deleted notes remain audible; source failure must fall back to the complete browser pattern.
 - R36: The standalone browser fallback must synthesize audible DPCM/sample-channel percussion instead of silently discarding those cells.
+- R37: Until editing is deliberately re-enabled, the public site is viewer-only and this requirement supersedes the editing portions of R4, R5, R14, R18, and R29–R36. It must not render Edit, Save, import, reset, undo/redo, note-entry, effect, volume, tempo, speed, loop-editing, or edited-preview controls.
+- R38: Viewer-only boot must ignore and remove only Chipvault's legacy per-track local project keys, always load the shipped clean baseline, and allow a newer build to reload even when browser storage is unavailable. Playback coordination state and unrelated storage must remain untouched.
 
 ## Acceptance checks
 
@@ -91,6 +93,8 @@ A static, offline-capable archive and modern browser tracker for the music uploa
 - C31: Browser tests save the edited working copy, prove Edit closes into Play with Edited preview active, play the changed sound and moving rows, reload, and prove the saved cell values and Edited preview selection persist without invoking Export.
 - C32: Browser tests edit a source-backed cell and prove Edit, Save-to-Play, and reload all enter `layered-preview` with the media element advancing, the backing marked active, and tracker rows moving; explicitly selecting Original mix still enters `source-playing`.
 - C33: Unit tests prove row-to-source-time inversion, tempo-aligned source playback rate, and an audible DPCM/sample trigger in the standalone fallback.
+- C34: A previously used browser profile and a clean navigation both show `viewer-only`, contain no edit/save/import controls or edited cells, load the shipped baseline, play archived tracks through `source-playing`, and retain pattern, FamiTracker, and source-audio downloads.
+- C35: Unit tests prove legacy Chipvault project keys are removed without reading their values or removing unrelated keys; production build, repeated reloads, historical-asset checks, and the live Pages URL all report the current viewer-only build.
 
 ## Out of scope for this recovery pass
 

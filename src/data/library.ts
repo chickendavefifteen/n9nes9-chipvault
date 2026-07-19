@@ -123,7 +123,7 @@ export const library: LibraryTrack[] = [
     id: 'ez8m4PXksQs', slug: 'bonus-epic-sax-guy', title: 'BONUS - Epic Sax Guy (10-minute chiptune)', shortTitle: 'BONUS: Epic Sax Guy',
     kind: 'bonus', duration: 600, uploaded: '2024-01-27', expansion: 'VRC6',
     credit: 'Chiptune arrangement of the saxophone riff performed by SunStroke Project and Olia Tira.',
-    description: 'An editable browser-synthesized VRC6-style arrangement, looped for a maximum ten-minute session.',
+    description: 'A browser-synthesized VRC6-style arrangement, looped for a maximum ten-minute session.',
     sourceUrl: 'https://www.youtube.com/watch?v=ez8m4PXksQs', poster: 'posters/epic-sax-bonus.svg', recoveryStatus: 'arranged-cover',
   },
 ]
