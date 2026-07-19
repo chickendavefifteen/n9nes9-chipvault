@@ -6,7 +6,7 @@ const channelMix: Record<ChannelDefinition['id'], number> = {
   pulse2: 0.34,
   triangle: 0.48,
   noise: 0.14,
-  dpcm: 0,
+  dpcm: 0.42,
   vrc6Pulse1: 0.52,
   vrc6Pulse2: 0.32,
   vrc6Saw: 0.36,
@@ -42,7 +42,7 @@ export class ChipAudioEngine {
   }
 
   play(cell: TrackerCell, channel: ChannelDefinition, duration: number): boolean {
-    if (!cell.note || channel.oscillator === 'sample') return false
+    if (!cell.note) return false
     try {
       const context = this.ensureContext()
       if (context.state === 'suspended') void context.resume()
@@ -54,6 +54,19 @@ export class ChipAudioEngine {
       gain.gain.setValueAtTime(volume, now)
       gain.gain.exponentialRampToValueAtTime(0.001, now + Math.max(0.03, duration * 0.92))
       gain.connect(this.master!)
+
+      if (channel.oscillator === 'sample') {
+        const oscillator = context.createOscillator()
+        const burst = Math.min(duration, 0.16)
+        oscillator.type = 'triangle'
+        oscillator.frequency.setValueAtTime(110, now)
+        oscillator.frequency.exponentialRampToValueAtTime(42, now + burst)
+        oscillator.connect(gain)
+        this.track(oscillator)
+        oscillator.start(now)
+        oscillator.stop(now + burst)
+        return true
+      }
 
       if (channel.oscillator === 'noise') {
         const length = Math.ceil(context.sampleRate * Math.min(duration, 0.12))

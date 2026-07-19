@@ -53,6 +53,8 @@ A static, offline-capable archive and modern browser tracker for the music uploa
 - R32: Any sound-affecting edit must automatically arm Edited preview for the next Play, place its playhead on the changed row, stop an incompatible source transport, and visibly identify that start row. Original mix remains available only as an explicit A/B selection after the edit.
 - R33: Saving must return to Play mode with the saved edited pattern selected. Play and reload must use that locally saved pattern until the operator explicitly selects Original mix or resets it; export remains optional.
 - R34: In the tracker, a mouse drag must select an inclusive rectangular range across rows and channels. Note entry, volume/effect changes, Delete/Backspace, and the visible Delete selected action must apply to the whole range as one undoable edit.
+- R35: Edited playback for a preserved recording must retain the authentic recording as a synchronized backing layer and synthesize only browser-authored cells over it in both Edit and saved Play. The backing may duck only on edited rows so changed and deleted notes remain audible; source failure must fall back to the complete browser pattern.
+- R36: The standalone browser fallback must synthesize audible DPCM/sample-channel percussion instead of silently discarding those cells.
 
 ## Acceptance checks
 
@@ -87,6 +89,8 @@ A static, offline-capable archive and modern browser tracker for the music uploa
 - C29: Browser tests begin in Original mix, edit a known cell to a different pitch, prove the active preview and Play label switch automatically, prove playback begins on that cell and advances under `chip-preview`, then explicitly switch back to Original mix and prove source playback remains available.
 - C30: Browser tests drag across a two-channel by three-row rectangle, prove six cells are selected, fill all six with one note, delete all six, undo the batch once, and retain one visible dirty state throughout the unsaved working copy.
 - C31: Browser tests save the edited working copy, prove Edit closes into Play with Edited preview active, play the changed sound and moving rows, reload, and prove the saved cell values and Edited preview selection persist without invoking Export.
+- C32: Browser tests edit a source-backed cell and prove Edit, Save-to-Play, and reload all enter `layered-preview` with the media element advancing, the backing marked active, and tracker rows moving; explicitly selecting Original mix still enters `source-playing`.
+- C33: Unit tests prove row-to-source-time inversion, tempo-aligned source playback rate, and an audible DPCM/sample trigger in the standalone fallback.
 
 ## Out of scope for this recovery pass
 

@@ -84,13 +84,13 @@ describe('Chipvault project interchange', () => {
     expect(BUILD_ID).toMatch(/^\d{4}-\d{2}-\d{2}\.\d+$/)
     expect(shouldReloadBuild(BUILD_ID)).toBe(false)
     expect(shouldReloadBuild('2026-07-18.5')).toBe(false)
-    expect(shouldReloadBuild('2026-07-18.10')).toBe(true)
+    expect(shouldReloadBuild('2026-07-18.11')).toBe(true)
     expect(shouldReloadBuild('broken')).toBe(false)
     expect(isNewerBuild('2026-07-18.6', '2026-07-18.5')).toBe(true)
-    expect(buildUpdateAction('2026-07-18.10', { playbackActive: false, editing: false, storageHealthy: true })).toBe('reload')
-    expect(buildUpdateAction('2026-07-18.10', { playbackActive: true, editing: false, storageHealthy: true })).toBe('notify')
-    expect(buildUpdateAction('2026-07-18.10', { playbackActive: false, editing: true, storageHealthy: true })).toBe('notify')
-    expect(buildUpdateAction('2026-07-18.10', { playbackActive: false, editing: false, storageHealthy: false })).toBe('notify')
+    expect(buildUpdateAction('2026-07-18.11', { playbackActive: false, editing: false, storageHealthy: true })).toBe('reload')
+    expect(buildUpdateAction('2026-07-18.11', { playbackActive: true, editing: false, storageHealthy: true })).toBe('notify')
+    expect(buildUpdateAction('2026-07-18.11', { playbackActive: false, editing: true, storageHealthy: true })).toBe('notify')
+    expect(buildUpdateAction('2026-07-18.11', { playbackActive: false, editing: false, storageHealthy: false })).toBe('notify')
   })
 
   it('exports the required FamiTracker 0.4.6 text sections', () => {

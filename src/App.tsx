@@ -24,20 +24,37 @@ import {
   SOURCE_STALL_GRACE_MS,
   sourceLoopStart,
   sourceNeedsFallback,
+  sourcePlaybackRate,
   sourceRowPosition,
+  sourceTimeForRow,
 } from './lib/playback'
 import type { ChannelId, LibraryTrack, TrackerProject } from './types'
 
 type ViewMode = 'tracker' | 'piano'
 type Filter = 'all' | 'original' | 'cover' | 'demo' | 'bonus'
 type PreviewMode = 'source' | 'chip'
-type ChipPurpose = 'preview' | 'fallback'
+type ChipPurpose = 'preview' | 'fallback' | 'layered'
 type SaveStatus = 'dirty' | 'saved' | 'temporary'
 
 const engine = new ChipAudioEngine()
+const LAYERED_BACKING_VOLUME = 0.88
+const LAYERED_EDIT_DUCK_VOLUME = 0.46
 const trackerChannelIds = channels.map((channel) => channel.id)
 const storageKey = (id: string) => `n9nes9-chipvault:${id}`
 const asset = (path: string) => `${import.meta.env.BASE_URL}${path}`
+
+function configureReferenceAudio(audio: HTMLAudioElement, volume = 1, playbackRate = 1) {
+  audio.volume = volume
+  audio.playbackRate = playbackRate
+  const pitchSafeAudio = audio as HTMLAudioElement & {
+    preservesPitch?: boolean
+    mozPreservesPitch?: boolean
+    webkitPreservesPitch?: boolean
+  }
+  if ('preservesPitch' in pitchSafeAudio) pitchSafeAudio.preservesPitch = true
+  if ('mozPreservesPitch' in pitchSafeAudio) pitchSafeAudio.mozPreservesPitch = true
+  if ('webkitPreservesPitch' in pitchSafeAudio) pitchSafeAudio.webkitPreservesPitch = true
+}
 
 function loadProject(track: LibraryTrack): TrackerProject {
   const recovered = recoveredProjectForTrack(track)
@@ -106,13 +123,16 @@ function App() {
   const audioRef = useRef<HTMLAudioElement>(null)
   const timerRef = useRef<number | null>(null)
   const sourceAttemptRef = useRef(0)
+  const internalPauseRef = useRef(false)
   const sourceWatchdogRef = useRef<number | null>(null)
   const playbackChannelRef = useRef<BroadcastChannel | null>(null)
   const tabIdRef = useRef(`tab-${Date.now().toString(36)}-${Math.random().toString(36).slice(2)}`)
   const playbackActiveRef = useRef(false)
   const editingRef = useRef(editing)
   const previewModeRef = useRef<PreviewMode>(previewMode)
+  const chipPurposeRef = useRef<ChipPurpose | null>(null)
   const chipStartRowRef = useRef(playhead)
+  const layeredResumeTimeRef = useRef<number | null>(null)
   const storageHealthyRef = useRef(storageHealthy)
   const selectionDraggingRef = useRef(false)
 
@@ -131,16 +151,22 @@ function App() {
   const editedCount = useMemo(() => channels.reduce((total, channel) => (
     total + project.cells[channel.id].filter((cell) => cell.edited).length
   ), 0), [project])
+  const hasEditedPreview = projectPreviewRow(project) !== null
+  const hasLayeredPreview = Boolean(selectedTrack.audio && hasEditedPreview)
   const referenceActive = referenceStarting || referencePlaying
   const playbackActive = playing || referenceActive
-  const transportMode = playing ? (chipPurpose === 'fallback' ? 'chip-fallback' : 'chip-preview') : referencePlaying ? 'source-playing' : referenceStarting ? 'source-starting' : 'idle'
-  const playbackName = referenceActive
-    ? 'original recording'
-    : playing
-      ? 'edited chip preview'
-      : previewMode === 'chip'
+  const transportMode = playing
+    ? chipPurpose === 'layered' ? 'layered-preview' : chipPurpose === 'fallback' ? 'chip-fallback' : 'chip-preview'
+    : referencePlaying ? 'source-playing' : referenceStarting ? 'source-starting' : 'idle'
+  const playbackName = chipPurpose === 'layered'
+    ? 'layered edit mix'
+    : referenceActive
+      ? 'original recording'
+      : playing
         ? 'edited chip preview'
-        : selectedTrack.audio ? 'original recording' : 'edited chip preview'
+        : previewMode === 'chip'
+          ? hasLayeredPreview ? 'layered edit mix' : 'edited chip preview'
+          : selectedTrack.audio ? 'original recording' : 'edited chip preview'
   const editedStartLabel = lastEditedRow === null ? null : `${Math.floor(lastEditedRow / project.patternLength).toString(16).padStart(2, '0').toUpperCase()}:${(lastEditedRow % project.patternLength).toString(16).padStart(2, '0').toUpperCase()}`
   const savedTime = lastSavedAt === null ? null : new Date(lastSavedAt).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', second: '2-digit' })
   const saveText = saveStatus === 'temporary'
@@ -172,6 +198,7 @@ function App() {
     if (timerRef.current !== null) window.clearInterval(timerRef.current)
     timerRef.current = null
     engine.stop()
+    chipPurposeRef.current = null
     setPlaying(false)
     setChipPurpose(null)
     if (nextMessage) setMessage(nextMessage)
@@ -185,7 +212,10 @@ function App() {
   const pauseReference = useCallback(() => {
     sourceAttemptRef.current += 1
     clearSourceWatchdog()
-    audioRef.current?.pause()
+    const audio = audioRef.current
+    if (audio && !audio.paused) internalPauseRef.current = true
+    audio?.pause()
+    if (audio) configureReferenceAudio(audio)
     setReferenceStarting(false)
     setReferencePlaying(false)
   }, [clearSourceWatchdog])
@@ -276,17 +306,19 @@ function App() {
     setSaveStatus('saved')
     setLastSavedAt(Date.now())
     if (savedEditRow !== null) {
+      layeredResumeTimeRef.current = null
       chipStartRowRef.current = savedEditRow
       setLastEditedRow(savedEditRow)
       setPlayhead(savedEditRow)
     }
     setMessage(mode === 'chip'
-      ? 'Saved locally · Play now uses your edited pattern'
+      ? selectedTrack.audio ? 'Saved locally · Play now uses the layered edit mix' : 'Saved locally · Play now uses your edited pattern'
       : 'Saved locally · Play mode ready')
   }
 
   const armEditedPreview = useCallback((row: number, detail: string) => {
     previewModeRef.current = 'chip'
+    layeredResumeTimeRef.current = null
     chipStartRowRef.current = row
     if (playbackActiveRef.current) stopEverything()
     const order = Math.floor(row / project.patternLength).toString(16).padStart(2, '0').toUpperCase()
@@ -294,7 +326,7 @@ function App() {
     setPreviewMode('chip')
     setPlayhead(row)
     setLastEditedRow(row)
-    setMessage(`${detail} · unsaved · Edited preview armed at ${order}:${patternRow}`)
+    setMessage(`${detail} · unsaved · Layered edit mix armed at ${order}:${patternRow}`)
   }, [project.patternLength, stopEverything])
 
   const commitPreviewEdit = useCallback((mutate: (draft: TrackerProject) => void, row: number, detail: string) => {
@@ -313,7 +345,7 @@ function App() {
 
   const syncReference = useCallback(() => {
     const audio = audioRef.current
-    if (!audio || previewModeRef.current === 'chip') return
+    if (!audio || (previewModeRef.current === 'chip' && chipPurposeRef.current !== 'layered')) return
     setPlayhead(Math.floor(sourceRowPosition(audio.currentTime, project.sourceSync, project.tempo, project.rows)))
   }, [project.rows, project.sourceSync, project.tempo])
 
@@ -322,6 +354,7 @@ function App() {
     pauseReference()
     broadcastPlayback()
     void engine.unlock()
+    chipPurposeRef.current = purpose
     setChipPurpose(purpose)
     if (purpose === 'fallback') {
       previewModeRef.current = 'chip'
@@ -377,9 +410,75 @@ function App() {
       }
       setReferenceStarting(false)
       setReferencePlaying(true)
-      setMessage('Playing original recording')
+      setMessage(chipPurposeRef.current === 'layered' ? 'Playing layered edit mix' : 'Playing original recording')
     }, SOURCE_STALL_GRACE_MS)
   }, [clearSourceWatchdog, startChip])
+
+  const startLayeredPreview = useCallback((looping = false) => {
+    const audio = audioRef.current
+    if (!audio) {
+      startChip('Source audio unavailable — full chip fallback active', 'fallback')
+      return
+    }
+
+    stopChip()
+    pauseReference()
+    broadcastPlayback()
+    void engine.unlock()
+    chipPurposeRef.current = 'layered'
+    setChipPurpose('layered')
+    previewModeRef.current = 'chip'
+    setPreviewMode('chip')
+
+    const startRow = looping ? 0 : chipStartRowRef.current
+    const resumeTime = looping ? null : layeredResumeTimeRef.current
+    layeredResumeTimeRef.current = null
+    const rowDuration = 60 / project.tempo / 4
+    configureReferenceAudio(audio, LAYERED_BACKING_VOLUME, sourcePlaybackRate(project.sourceSync, project.tempo))
+    audio.currentTime = resumeTime ?? sourceTimeForRow(startRow, project.sourceSync, project.tempo, project.rows)
+    setPlayhead(startRow)
+    chipStartRowRef.current = startRow
+
+    const attempt = sourceAttemptRef.current + 1
+    sourceAttemptRef.current = attempt
+    setReferenceStarting(true)
+    setReferencePlaying(false)
+    setPlaying(true)
+    setMessage(looping ? 'Looping layered edit mix' : 'Starting layered edit mix…')
+
+    const startOverlay = () => {
+      if (sourceAttemptRef.current !== attempt || chipPurposeRef.current !== 'layered' || timerRef.current !== null) return
+      let lastRow = -1
+      const tick = () => {
+        if (sourceAttemptRef.current !== attempt || chipPurposeRef.current !== 'layered') return
+        const row = Math.floor(sourceRowPosition(audio.currentTime, project.sourceSync, project.tempo, project.rows)) % project.rows
+        if (row === lastRow) return
+        lastRow = row
+        setPlayhead(row)
+        chipStartRowRef.current = row
+        const editedCells = channels.filter((channel) => project.cells[channel.id][row].edited)
+        audio.volume = editedCells.length ? LAYERED_EDIT_DUCK_VOLUME : LAYERED_BACKING_VOLUME
+        editedCells.forEach((channel) => {
+          if (!muted.has(channel.id)) engine.play(project.cells[channel.id][row], channel, rowDuration * 0.9)
+        })
+      }
+      tick()
+      timerRef.current = window.setInterval(tick, 16)
+    }
+
+    const initialTime = audio.currentTime
+    try {
+      void Promise.resolve(audio.play()).then(() => {
+        if (sourceAttemptRef.current !== attempt) return
+        startOverlay()
+        armSourceWatchdog(attempt, initialTime)
+      }).catch(() => {
+        if (sourceAttemptRef.current === attempt) startChip('Source audio was blocked — full chip fallback active', 'fallback')
+      })
+    } catch {
+      if (sourceAttemptRef.current === attempt) startChip('Source audio was blocked — full chip fallback active', 'fallback')
+    }
+  }, [armSourceWatchdog, broadcastPlayback, muted, pauseReference, project, startChip, stopChip])
 
   const beginSourcePlayback = useCallback((looping = false) => {
     const audio = audioRef.current
@@ -396,6 +495,7 @@ function App() {
     setMessage(looping ? 'Looping original recording' : 'Starting original recording…')
     broadcastPlayback()
     void engine.unlock()
+    configureReferenceAudio(audio)
     const offset = sourceLoopStart(project.sourceSync)
     if (looping || audio.ended || (Number.isFinite(audio.duration) && audio.currentTime >= audio.duration - 0.05) || audio.currentTime < offset) {
       audio.currentTime = offset
@@ -419,6 +519,7 @@ function App() {
     const nextPreviewRow = projectPreviewRow(nextProject)
     const nextMode: PreviewMode = nextPreviewRow !== null ? 'chip' : track.audio ? 'source' : 'chip'
     stopEverything()
+    layeredResumeTimeRef.current = null
     setSelectedId(track.id)
     setProject(nextProject)
     setUndoStack([])
@@ -657,51 +758,69 @@ function App() {
 
   const handleReferencePlaying = () => {
     clearSourceWatchdog()
-    stopChip()
+    const layered = chipPurposeRef.current === 'layered'
+    if (!layered) {
+      stopChip()
+      if (audioRef.current) configureReferenceAudio(audioRef.current)
+    }
     setReferenceStarting(false)
     setReferencePlaying(true)
     broadcastPlayback()
-    setMessage('Playing original recording')
+    setMessage(layered ? 'Playing layered edit mix' : 'Playing original recording')
   }
 
   const handleReferencePause = () => {
+    if (internalPauseRef.current) {
+      internalPauseRef.current = false
+      return
+    }
     sourceAttemptRef.current += 1
     clearSourceWatchdog()
     setReferenceStarting(false)
     setReferencePlaying(false)
+    if (chipPurposeRef.current === 'layered' && !audioRef.current?.ended) {
+      layeredResumeTimeRef.current = audioRef.current?.currentTime ?? null
+      stopChip('Paused')
+      if (audioRef.current) configureReferenceAudio(audioRef.current)
+    }
   }
 
   const handleReferenceWaiting = () => {
     if (!referenceActive) return
     const audio = audioRef.current
     if (!audio) return
-    setMessage('Buffering original recording…')
+    setMessage(chipPurposeRef.current === 'layered' ? 'Re-syncing layered edit mix…' : 'Buffering original recording…')
     armSourceWatchdog(sourceAttemptRef.current, audio.currentTime)
   }
 
   const handleReferenceEnded = () => {
+    const endedPurpose = chipPurposeRef.current
     clearSourceWatchdog()
     setReferenceStarting(false)
     setReferencePlaying(false)
-    if (shouldRestartSource(project.loop, document.hidden) && previewMode === 'source') {
-      beginSourcePlayback(true)
+    if (shouldRestartSource(project.loop, document.hidden) && (previewMode === 'source' || endedPurpose === 'layered')) {
+      if (endedPurpose === 'layered') startLayeredPreview(true)
+      else beginSourcePlayback(true)
     } else {
       sourceAttemptRef.current += 1
-      setMessage('Recording finished')
+      if (endedPurpose === 'layered') stopChip('Layered edit mix finished')
+      else setMessage('Recording finished')
     }
   }
 
   const handleReferenceError = () => {
-    if (referenceActive) startChip('Source audio failed — edited chip fallback active', 'fallback')
+    if (referenceActive || chipPurposeRef.current === 'layered') startChip('Source audio failed — full chip fallback active', 'fallback')
     else setMessage('Source recording could not load in this browser')
   }
 
   function toggleTransport() {
     if (playbackActive) {
+      if (chipPurposeRef.current === 'layered') layeredResumeTimeRef.current = audioRef.current?.currentTime ?? null
       stopEverything('Paused')
       return
     }
     if (previewMode === 'source' && audioRef.current) beginSourcePlayback()
+    else if (hasLayeredPreview) startLayeredPreview()
     else startChip(selectedTrack.kind === 'bonus' ? 'Playing editable chiptune arrangement' : 'Playing edited chip preview')
   }
 
@@ -724,8 +843,8 @@ function App() {
         setPlayhead(savedEditRow)
       }
       setMessage(mode === 'source'
-        ? 'Editing · original recording selected · the first change will arm Edited preview'
-        : `Editing saved chiptune${savedEditRow === null ? '' : ' · Edited preview restored at the last changed row'}`)
+        ? 'Editing · original recording selected · the first change will arm Layered edit mix'
+        : `Editing saved chiptune${savedEditRow === null ? '' : selectedTrack.audio ? ' · Layered edit mix restored at the last changed row' : ' · Edited preview restored at the last changed row'}`)
     } else {
       const savedEditRow = projectPreviewRow(project)
       const mode: PreviewMode = savedEditRow !== null ? 'chip' : selectedTrack.audio ? 'source' : 'chip'
@@ -738,6 +857,7 @@ function App() {
   const choosePreview = (next: PreviewMode) => {
     if (next === 'source' && !selectedTrack.audio) return
     previewModeRef.current = next
+    layeredResumeTimeRef.current = null
     stopEverything()
     setPreviewMode(next)
     if (next === 'chip') {
@@ -747,7 +867,7 @@ function App() {
     }
     setMessage(next === 'source'
       ? 'Original recording selected · authentic mix, edits remain visible'
-      : `Edited chip preview selected${editedStartLabel ? ` · starts at ${editedStartLabel}` : ''}`)
+      : `${hasLayeredPreview ? 'Layered edit mix' : 'Edited chip preview'} selected${editedStartLabel ? ` · starts at ${editedStartLabel}` : ''}`)
   }
 
   const setEditorView = (next: ViewMode) => {
@@ -764,6 +884,7 @@ function App() {
     stopEverything()
     if (audioRef.current) audioRef.current.currentTime = project.sourceSync?.audioOffset ?? 0
     chipStartRowRef.current = 0
+    layeredResumeTimeRef.current = null
     setPlayhead(0)
     setMessage('Returned to first row')
   }
@@ -857,7 +978,7 @@ function App() {
           <button onClick={() => setAboutOpen(true)}>Why?</button>
         </section>
 
-        <section className="workbench" data-transport={transportMode}>
+        <section className="workbench" data-transport={transportMode} data-preview={previewMode === 'chip' && hasLayeredPreview ? 'layered' : previewMode} data-backing-active={chipPurpose === 'layered' && referencePlaying ? 'true' : 'false'}>
           <div className="transport-bar">
             <div className="transport-buttons">
               <button className="play-button" onClick={toggleTransport} aria-label={playbackActive ? `Pause ${playbackName}` : `Play ${playbackName}`} title={playbackActive ? `Pause ${playbackName}` : `Play ${playbackName}`}>{playbackActive ? '■' : '▶'}</button>
@@ -872,15 +993,17 @@ function App() {
             <span className={`save-state ${editedCount ? 'has-edits' : ''} ${saveStatus}`} role="status" aria-live="polite" title="Projects are stored only in this browser on this device. Export is optional."><i /> {saveText}</span>
           </div>
 
-          {(editing || editedCount > 0) && <div className={`edit-session-bar ${editing ? '' : 'play-session'}`}>
+          {(editing || hasEditedPreview) && <div className={`edit-session-bar ${editing ? '' : 'play-session'}`}>
             <div className="preview-switch" role="group" aria-label="Playback preview">
               <button className={previewMode === 'source' ? 'active' : ''} disabled={!selectedTrack.audio} onClick={() => choosePreview('source')}><span>Original mix</span><small>{selectedTrack.audio ? 'authentic recording' : 'unavailable'}</small></button>
-              <button className={previewMode === 'chip' ? 'active' : ''} onClick={() => choosePreview('chip')}><span>Edited preview</span><small>{editedStartLabel ? `next Play · ${editedStartLabel}` : 'browser chiptune'}</small></button>
+              <button className={previewMode === 'chip' ? 'active' : ''} onClick={() => choosePreview('chip')}><span>{hasLayeredPreview ? 'Layered edit mix' : 'Edited preview'}</span><small>{editedStartLabel ? `next Play · ${editedStartLabel}` : 'browser chiptune'}</small></button>
             </div>
             <p>{previewMode === 'source'
-              ? <><strong>Original recording</strong><span>Your local edits stay on the grid. Choose Edited preview to hear the saved browser pattern.</span></>
-              : <><strong>{editedStartLabel ? `Edited preview · ${editedStartLabel}` : 'Approximate edited sound'}</strong><span>{editing && saveStatus === 'dirty' ? 'You are hearing the working copy. Save before returning to Play.' : 'Play uses the pattern saved locally in this browser.'}</span></>}</p>
-            {editing ? <div className={`edit-save-card ${saveStatus}`} role="status" aria-live="polite"><i /><span><strong>{saveStatus === 'temporary' ? 'Save blocked' : saveStatus === 'dirty' ? 'Unsaved changes' : 'Saved locally'}</strong><small>{saveStatus === 'temporary' ? 'Export JSON before closing' : saveStatus === 'dirty' ? `${editedCount} edit${editedCount === 1 ? '' : 's'} · not written yet` : savedTime ? `This browser · ${savedTime}` : 'No unsaved changes'}</small></span><button className="save-button" onClick={saveWorkspace}>Save &amp; go to Play</button></div> : <div className="play-mode-chip"><strong>Local project</strong><small>{previewMode === 'chip' ? 'edited pattern active' : 'original mix active'}</small></div>}
+              ? <><strong>Original recording</strong><span>Your local edits stay on the grid. Choose Layered edit mix to hear them over the authentic recording.</span></>
+              : hasLayeredPreview
+                ? <><strong>{editedStartLabel ? `Layered edit mix · ${editedStartLabel}` : 'Layered edit mix'}</strong><span>Original effects, drums, and mix stay underneath; only browser-authored cells are overlaid and the backing ducks briefly on edited rows.</span></>
+                : <><strong>{editedStartLabel ? `Edited preview · ${editedStartLabel}` : 'Approximate edited sound'}</strong><span>{editing && saveStatus === 'dirty' ? 'You are hearing the working copy. Save before returning to Play.' : 'Play uses the pattern saved locally in this browser.'}</span></>}</p>
+            {editing ? <div className={`edit-save-card ${saveStatus}`} role="status" aria-live="polite"><i /><span><strong>{saveStatus === 'temporary' ? 'Save blocked' : saveStatus === 'dirty' ? 'Unsaved changes' : 'Saved locally'}</strong><small>{saveStatus === 'temporary' ? 'Export JSON before closing' : saveStatus === 'dirty' ? `${editedCount} edit${editedCount === 1 ? '' : 's'} · not written yet` : savedTime ? `This browser · ${savedTime}` : 'No unsaved changes'}</small></span><button className="save-button" onClick={saveWorkspace}>Save &amp; go to Play</button></div> : <div className="play-mode-chip"><strong>Local project</strong><small>{previewMode === 'chip' ? hasLayeredPreview ? 'layered edit mix active' : 'edited pattern active' : 'original mix active'}</small></div>}
           </div>}
 
           <div className="editor-tabs">

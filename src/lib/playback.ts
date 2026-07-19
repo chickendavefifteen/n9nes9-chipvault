@@ -31,6 +31,25 @@ export function sourceRowPosition(
   return (elapsed / secondsPerRow) % loopRows
 }
 
+export function sourceTimeForRow(
+  row: number,
+  sync: SourceSync | undefined,
+  tempo: number,
+  rows: number,
+): number {
+  const secondsPerRow = sync?.secondsPerRow ?? 60 / Math.max(1, tempo) / 4
+  const audioOffset = sync?.audioOffset ?? 0
+  const loopRows = Math.max(1, sync?.loopRows ?? rows)
+  const normalizedRow = ((Math.floor(row) % loopRows) + loopRows) % loopRows
+  return audioOffset + normalizedRow * secondsPerRow
+}
+
+export function sourcePlaybackRate(sync: SourceSync | undefined, tempo: number): number {
+  const sourceSecondsPerRow = sync?.secondsPerRow ?? 60 / Math.max(1, tempo) / 4
+  const editedSecondsPerRow = 60 / Math.max(1, tempo) / 4
+  return Math.min(4, Math.max(0.25, sourceSecondsPerRow / editedSecondsPerRow))
+}
+
 export function sourceNeedsFallback(health: SourceHealth): boolean {
   if (health.elapsedMs < SOURCE_STALL_GRACE_MS) return false
   const advanced = health.currentTime - health.initialTime > 0.025

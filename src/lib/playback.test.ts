@@ -6,7 +6,9 @@ import {
   SOURCE_STALL_GRACE_MS,
   sourceLoopStart,
   sourceNeedsFallback,
+  sourcePlaybackRate,
   sourceRowPosition,
+  sourceTimeForRow,
 } from './playback'
 
 describe('playback reliability', () => {
@@ -14,13 +16,23 @@ describe('playback reliability', () => {
     const sync = { audioOffset: 1.5, secondsPerRow: 0.1, loopRows: 128, confidence: 1, evidence: [] }
     expect(sourceRowPosition(2.75, sync, 150, 128)).toBeCloseTo(12.5)
     expect(sourceRowPosition(14.35, sync, 150, 128)).toBeCloseTo(0.5)
+    expect(sourceTimeForRow(12, sync, 150, 128)).toBeCloseTo(2.7)
+    expect(sourceTimeForRow(140, sync, 150, 128)).toBeCloseTo(2.7)
     expect(sourceLoopStart(sync)).toBe(1.5)
   })
 
   it('animates unrecovered drafts from their declared tracker tempo', () => {
     expect(sourceRowPosition(1, undefined, 150, 64)).toBeCloseTo(10)
     expect(sourceRowPosition(6.5, undefined, 150, 64)).toBeCloseTo(1)
+    expect(sourceTimeForRow(10, undefined, 150, 64)).toBeCloseTo(1)
     expect(sourceLoopStart(undefined)).toBe(0)
+  })
+
+  it('keeps edited tracker rows synchronized when tempo changes', () => {
+    const sync = { audioOffset: 0, secondsPerRow: 0.1, loopRows: 128, confidence: 1, evidence: [] }
+    expect(sourcePlaybackRate(sync, 150)).toBeCloseTo(1)
+    expect(sourcePlaybackRate(sync, 300)).toBeCloseTo(2)
+    expect(sourcePlaybackRate(sync, 32)).toBe(0.25)
   })
 
   it('falls back only after a bounded source stall', () => {
