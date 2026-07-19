@@ -2,16 +2,18 @@
 
 An archive and modern browser tracker for the 17 music/demo uploads on the [N9NES9 YouTube channel](https://www.youtube.com/@n9nes9/videos).
 
-The source recordings are preserved locally in the site. Each track also has an editable NES + VRC6 recovery project with a classic tracker grid, piano roll, keyboard entry, chip-synth preview, local autosave, undo/redo, and open downloads.
+The source recordings are preserved locally in the site. Each track also has an editable NES + VRC6 recovery project with a classic tracker grid, piano roll, keyboard entry, chip-synth preview, browser autosave, undo/redo, and optional exports. Opening the editor never starts a download.
 
 ## Recovery integrity
 
-The audio recordings are authentic channel downloads. The editable patterns start blank because YouTube's mixed audio does not retain the original notes, instruments, effects, or frame order. The UI labels this state everywhere it matters. A recovered module can be imported as either:
+The audio recordings are authentic channel downloads. **Game Complete Loop** has the first video-frame recovery: two visible 64-row orders, source-audio synchronization, and confidence-labelled reconstructed instruments. The other recordings now open populated, editable audio-derived drafts generated from dominant-pitch and onset analysis of the preserved mix. These are explicitly labelled as lower-confidence drafts rather than lost original modules. A project can be imported as either:
 
 - Chipvault JSON (`.chipvault.json`) for lossless browser-editor round trips.
 - FamiTracker 0.4.6 text (`.txt`) for FamiTracker/FamiStudio interoperability.
 
-The editor exports the same two formats. It does not invent a binary `.ftm` wrapper.
+The editor exports the same two formats, including multi-pattern FamiTracker text round trips. Export is a separate optional action. It does not invent a binary `.ftm` wrapper.
+
+The application itself is cloud-hosted on GitHub Pages. Working copies currently persist in the browser; genuine cross-device saving requires a writable authenticated backend and is deliberately not misrepresented as active. Edit mode shows a timestamped **Saved in this browser** state. Its **Original mix** plays the authentic recording, while **Edited preview** deliberately plays the approximate editable reconstruction. Entering a note auditions it immediately, automatically arms Edited preview, and places the next Play on that changed row so the saved difference is actually heard.
 
 ## Local development
 
@@ -28,13 +30,24 @@ npm test
 npm run build
 ```
 
-The published site is served from the generated `gh-pages` branch. The editable source remains on `main`.
+Deploy only with:
+
+```powershell
+npm run deploy:pages
+```
+
+The deploy command tests and builds first, overlays `dist` onto the existing `gh-pages` branch, and refuses to push if the previous, current, or known historical HTML references a missing hashed asset. Historical entrypoint names are refreshed with the current tested bundle. GitHub Pages forces a ten-minute document cache, so the inline navigation bootstrap requests a unique `fresh` URL on every visit/reload and then restores the clean visible URL without a second navigation. Do not force-replace the Pages branch.
+
+Playback is intentionally single-tab: starting sound in one current Chipvault tab pauses any other current tab. Source audio drives the tracker animation for every recording, loops when Loop is enabled, and falls back to the already-unlocked chip engine if browser media playback is rejected or stalls.
+
+The published site is served from the generated `gh-pages` branch. The editable source remains on the source branch and is reviewed through a pull request.
 
 ## Content inventory
 
 - 9 original tracks
 - 7 cover arrangements with source credits retained where known
 - 1 technique demo
+- 1 editable VRC6-style Epic Sax Guy bonus arrangement with no copied source recording
 - 2 tutorials documented but excluded from the music archive
 
 See [SPEC.md](./SPEC.md) for the anchored requirements, acceptance checks, assumptions, and unknowns.

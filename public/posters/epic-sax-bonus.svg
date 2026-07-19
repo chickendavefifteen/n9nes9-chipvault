@@ -1,0 +1,22 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 800 800" role="img" aria-labelledby="title desc">
+  <title id="title">Epic Sax Guy bonus</title>
+  <desc id="desc">A neon saxophone against a bright striped sunset.</desc>
+  <defs>
+    <linearGradient id="sky" x2="0" y2="1"><stop stop-color="#180a3b"/><stop offset=".55" stop-color="#6c167a"/><stop offset="1" stop-color="#110824"/></linearGradient>
+    <linearGradient id="sun" x2="0" y2="1"><stop stop-color="#fff1a8"/><stop offset=".48" stop-color="#ff76cf"/><stop offset="1" stop-color="#8d4cff"/></linearGradient>
+    <linearGradient id="sax" x2="1" y2="1"><stop stop-color="#fff"/><stop offset=".32" stop-color="#6df5ff"/><stop offset=".68" stop-color="#b884ff"/><stop offset="1" stop-color="#ff55bf"/></linearGradient>
+    <filter id="glow"><feGaussianBlur stdDeviation="8" result="b"/><feMerge><feMergeNode in="b"/><feMergeNode in="SourceGraphic"/></feMerge></filter>
+    <clipPath id="sunClip"><circle cx="520" cy="290" r="210"/></clipPath>
+  </defs>
+  <rect width="800" height="800" fill="url(#sky)"/>
+  <g clip-path="url(#sunClip)" fill="url(#sun)"><circle cx="520" cy="290" r="210"/><path stroke="#54176c" stroke-width="16" d="M280 218h480M280 272h480M280 334h480M280 402h480"/></g>
+  <path d="M-60 800 400 510 860 800M-40 690h880M40 620h720M150 558h500M400 510v290M300 540l-70 260M500 540l70 260" fill="none" stroke="#66efff" stroke-opacity=".65" stroke-width="4"/>
+  <g fill="none" stroke="url(#sax)" stroke-linecap="round" stroke-linejoin="round" filter="url(#glow)">
+    <path d="M248 184c77 22 112 73 100 153l-35 210c-12 78 44 131 113 101 47-21 72-73 61-128" stroke-width="46"/>
+    <path d="M475 505c74-16 129 28 118 93-6 35-32 66-70 81" stroke-width="36"/>
+    <path d="m245 180-37-13m288 353 35-18" stroke-width="18"/>
+    <circle cx="330" cy="382" r="9" stroke-width="8"/><circle cx="321" cy="442" r="9" stroke-width="8"/><circle cx="316" cy="500" r="9" stroke-width="8"/>
+  </g>
+  <text x="52" y="682" fill="#fff" font-family="ui-monospace,monospace" font-size="76" font-weight="800" letter-spacing="2">BONUS</text>
+  <text x="57" y="736" fill="#7cf7ff" font-family="ui-monospace,monospace" font-size="28" letter-spacing="7">10 MIN SAX SESSION</text>
+</svg>

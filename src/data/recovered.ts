@@ -1,0 +1,222 @@
+import type { ChannelId, LibraryTrack, TrackerCell, TrackerProject } from '../types'
+import { createDraft } from '../lib/project'
+import transcriptionData from './audio-transcriptions.json'
+import interstellarRecovery from './interstellar-recovery.json'
+
+interface AudioTranscription {
+  tempo: number
+  rows: number
+  audioOffset: number
+  secondsPerRow: number
+  confidence: number
+  melody: Array<string | null>
+  harmony: Array<string | null>
+  bass: Array<string | null>
+  noise: Array<string | null>
+}
+
+const transcriptions = transcriptionData as Record<string, AudioTranscription>
+
+interface CompactVideoRecovery {
+  timing: {
+    playbackOffset: number
+    secondsPerRow: number
+    rows: number
+    orders: number
+  }
+  effectColumns: number[]
+  rows: string[][]
+}
+
+const interstellar = interstellarRecovery as CompactVideoRecovery
+const recoveryChannels: ChannelId[] = ['pulse1', 'pulse2', 'triangle', 'noise', 'dpcm', 'vrc6Pulse1', 'vrc6Pulse2', 'vrc6Saw']
+
+const blank = (): TrackerCell => ({ note: null, instrument: null, volume: null, effect: '' })
+
+function put(project: TrackerProject, channel: ChannelId, row: number, note: string | null, instrument: number | null = null, volume: number | null = null, effect = '') {
+  project.cells[channel][row] = { note, instrument, volume, effect }
+}
+
+function interstellarVideoRecovery(track: LibraryTrack): TrackerProject {
+  const project = createDraft(track, interstellar.timing.rows)
+  project.speed = 8
+  project.tempo = 150
+  project.patternLength = 64
+  project.loop = false
+  project.recoveryStatus = 'pattern-recovered'
+  project.contentRevision = 4
+  project.sourceSync = {
+    audioOffset: interstellar.timing.playbackOffset,
+    secondsPerRow: interstellar.timing.secondsPerRow,
+    loopRows: interstellar.timing.rows,
+    confidence: 0.96,
+    evidence: [
+      'Full 1280×720 YouTube tracker capture sampled row by row',
+      '12 visible 64-row orders and all eight 2A03/VRC6 channels',
+      'Notes, instruments, volumes, and every visible effect column recovered from the fixed pixel grid',
+      'Instrument envelope macros remain reconstructed because their editor was not shown in the video',
+    ],
+  }
+
+  interstellar.rows.forEach((rowCells, row) => {
+    rowCells.forEach((encoded, channelIndex) => {
+      const [noteToken, instrumentToken, volumeToken, ...effectTokens] = encoded.split(' ')
+      const visibleEffects = effectTokens.slice(0, interstellar.effectColumns[channelIndex])
+      const audibleEffect = visibleEffects.find((effect) => effect !== '...') ?? ''
+      project.cells[recoveryChannels[channelIndex]][row] = {
+        note: noteToken === '...' ? null : noteToken,
+        instrument: instrumentToken === '..' ? null : Number.parseInt(instrumentToken, 16),
+        volume: volumeToken === '.' ? null : Number.parseInt(volumeToken, 16),
+        effect: audibleEffect,
+        effects: visibleEffects,
+      }
+    })
+  })
+  return project
+}
+
+function populateRhythm(project: TrackerProject, offset: number) {
+  const pulse1 = ['G-3', 'B-3', 'G-4', 'B-4', 'G-4', 'B-3', 'G-3', 'B-3']
+  const pulse2 = ['G-3', 'E-3', 'G-4', 'E-4', 'G-4', 'E-3', 'G-3', 'E-3']
+  const noise = [
+    '0-#','E-#','E-#','E-#','6-#','E-#','E-#','E-#','0-#','E-#','E-#','E-#','6-#','E-#','E-#','E-#',
+    'E-#','E-#','0-#','E-#','6-#','E-#','E-#','E-#','0-#','E-#','0-#','E-#','6-#','E-#','E-#','E-#',
+    '0-#','E-#','E-#','E-#','6-#','E-#','E-#','E-#','0-#','E-#','0-#','E-#','6-#','E-#','0-#','E-#',
+    'E-#','E-#','0-#','E-#','6-#','E-#','E-#','E-#','0-#','E-#','0-#','E-#','6-#','E-#','E-#','E-#',
+  ]
+  for (let row = 0; row < 64; row += 1) {
+    put(project, 'pulse1', offset + row, pulse1[row % pulse1.length], 3, row === 0 ? 9 : null)
+    if (row > 0) put(project, 'pulse2', offset + row, pulse2[(row - 1) % pulse2.length], 3, row === 1 ? 5 : null)
+    put(project, 'noise', offset + row, noise[row], 3, noise[row] === 'E-#' ? 9 : 12)
+  }
+  const saw: Array<[number, string]> = [
+    [0,'G-0'],[2,'G-1'],[4,'G-0'],[6,'A#0'],[10,'A#1'],[12,'A#0'],[14,'C-1'],[18,'C-2'],[20,'G-1'],[22,'F-0'],
+    [26,'F-1'],[28,'F#0'],[30,'F#1'],[32,'G-0'],[34,'G-1'],[36,'G-0'],[38,'A#0'],[42,'A#1'],[44,'A#0'],[46,'C-1'],
+    [50,'C-2'],[52,'C-1'],[54,'F-0'],[58,'F-1'],[60,'F#0'],[62,'F#1'],
+  ]
+  saw.forEach(([row, note]) => put(project, 'vrc6Saw', offset + row, note, 0))
+}
+
+function populateOrderZero(project: TrackerProject) {
+  const v1: Array<[number, string | null, number | null, string?]> = [
+    [0,'C-4',10,'V06'],[4,'B-3',null],[8,'G-3',null],[10,'F-3',null],[14,'G-3',null],[18,'B-3',null],
+    [20,'C-4',null],[22,'D-4',null,'306'],[24,null,null,'300'],[26,'C-4',null],[28,'B-3',null],[30,'G-3',null],
+    [32,'B-3',null],[34,'G-3',null],[36,'F-3',null],[38,'G-3',null],[40,null,null,'463'],[48,null,null,'400'],
+    [50,'B-3',null],[52,'C-4',null],[54,'D-4',null],
+  ]
+  const v2: Array<[number, string | null, number | null, string?]> = [
+    [3,'C-4',6,'V06'],[7,'B-3',null],[11,'G-3',null],[13,'F-3',null],[17,'G-3',null],[21,'B-3',null],
+    [23,'C-4',null],[25,'D-4',null,'306'],[27,null,null,'300'],[29,'C-4',null],[31,'B-3',null],[33,'G-3',null],
+    [35,'B-3',null],[37,'G-3',null],[39,'F-3',null],[41,'G-3',null],[43,null,null,'463'],[51,null,null,'400'],
+    [53,'B-3',null],[55,'C-4',null],[57,'D-4',null],
+  ]
+  v1.forEach(([row, note, volume, effect]) => put(project, 'vrc6Pulse1', row, note, note ? 0 : null, volume, effect))
+  v2.forEach(([row, note, volume, effect]) => put(project, 'vrc6Pulse2', row, note, note ? 0 : null, volume, effect))
+}
+
+function populateOrderOne(project: TrackerProject) {
+  const offset = 64
+  const v1: Array<[number, string | null, number | null, string?]> = [
+    [0,'G-4',10],[4,'F-4',null],[8,'D-4',null],[10,'C-4',null],[14,'D-4',null,'306'],[16,null,null,'300'],
+    [18,'C-4',null],[20,'B-3',null],[22,'G-3',null],[24,'C-4',null],[26,'B-3',null],[28,'F-3',null],
+    [30,'G-3',null],[32,null,null,'463'],[44,null,null,'400'],[46,'G-4',null],[48,null,null,'463'],[60,null,null,'400'],
+  ]
+  const v2: Array<[number, string | null, number | null, string?]> = [
+    [3,'G-4',6],[7,'F-4',null],[11,'D-4',null],[13,'C-4',null],[17,'D-4',null,'306'],[19,null,null,'300'],
+    [21,'C-4',null],[23,'B-3',null],[25,'G-3',null],[27,'C-4',null],[29,'B-3',null],[31,'F-3',null],
+    [35,null,null,'463'],[47,null,null,'400'],[49,'G-4',null],[51,null,null,'463'],[63,null,null,'400'],
+  ]
+  v1.forEach(([row, note, volume, effect]) => put(project, 'vrc6Pulse1', offset + row, note, note ? 0 : null, volume, effect))
+  v2.forEach(([row, note, volume, effect]) => put(project, 'vrc6Pulse2', offset + row, note, note ? 0 : null, volume, effect))
+}
+
+function gameCompleteLoop(track: LibraryTrack): TrackerProject {
+  const project = createDraft(track, 128)
+  project.cells = Object.fromEntries(Object.keys(project.cells).map((id) => [id, Array.from({ length: 128 }, blank)])) as TrackerProject['cells']
+  project.patternLength = 64
+  project.recoveryStatus = 'pattern-recovered'
+  project.contentRevision = 2
+  project.sourceSync = {
+    audioOffset: 1.839,
+    secondsPerRow: 0.1,
+    loopRows: 128,
+    confidence: 0.92,
+    evidence: ['YouTube video frames at 1s, 7s, 8s, and 12s', 'FFmpeg silence boundary at 1.839s', 'Two visible 64-row FamiTracker orders'],
+  }
+  populateRhythm(project, 0)
+  populateRhythm(project, 64)
+  populateOrderZero(project)
+  populateOrderOne(project)
+  return project
+}
+
+function audioTranscription(track: LibraryTrack, data: AudioTranscription): TrackerProject {
+  const project = createDraft(track, data.rows)
+  project.tempo = data.tempo
+  project.patternLength = 64
+  project.recoveryStatus = 'audio-transcribed'
+  project.contentRevision = 3
+  project.sourceSync = {
+    audioOffset: data.audioOffset,
+    secondsPerRow: data.secondsPerRow,
+    loopRows: data.rows,
+    confidence: data.confidence,
+    evidence: [
+      'Dominant-pitch and onset analysis of the preserved audio mix',
+      'Quantized to an editable 128-row tracker draft',
+      'Original channel assignments and instrument envelopes remain unknown',
+    ],
+  }
+
+  const leadChannel: ChannelId = track.expansion === 'VRC6' ? 'vrc6Pulse1' : 'pulse1'
+  const harmonyChannel: ChannelId = track.expansion === 'VRC6' ? 'vrc6Pulse2' : 'pulse2'
+  const bassChannel: ChannelId = track.expansion === 'VRC6' ? 'vrc6Saw' : 'triangle'
+  for (let row = 0; row < data.rows; row += 1) {
+    if (data.melody[row]) put(project, leadChannel, row, data.melody[row], 0, 13)
+    if (data.harmony[row]) put(project, harmonyChannel, row, data.harmony[row], 0, 5)
+    if (data.bass[row]) put(project, bassChannel, row, data.bass[row], 0, 8)
+    if (data.noise[row]) put(project, 'noise', row, data.noise[row], 3, row % 8 === 0 ? 8 : 4)
+  }
+  return project
+}
+
+function epicSaxArrangement(track: LibraryTrack): TrackerProject {
+  const project = createDraft(track, 64)
+  project.tempo = 132
+  project.patternLength = 64
+  project.recoveryStatus = 'arranged-cover'
+  project.contentRevision = 1
+
+  const melody: Array<[number, string, number]> = [
+    [0, 'A-4', 4], [4, 'A-4', 2], [6, 'A-4', 2], [8, 'A-4', 2], [10, 'A-4', 3], [14, 'G-4', 2], [16, 'A-4', 4],
+    [22, 'A-4', 2], [24, 'A-4', 2], [26, 'A-4', 2], [28, 'G-4', 2], [30, 'A-4', 4],
+    [36, 'C-5', 2], [38, 'A-4', 2], [40, 'G-4', 2], [42, 'F-4', 4],
+    [48, 'D-4', 2], [50, 'D-4', 2], [52, 'E-4', 2], [54, 'F-4', 4], [60, 'D-4', 4],
+  ]
+  melody.forEach(([start, note, length]) => {
+    for (let row = start; row < Math.min(64, start + length); row += 1) {
+      put(project, 'vrc6Pulse1', row, note, 0, Math.max(7, 15 - (row - start) * 2), row === start && start % 16 === 0 ? 'V02' : '')
+      if (row > start) put(project, 'pulse1', row, note, 0, 5)
+    }
+  })
+
+  const chords = [
+    ['A-3', 'C-4', 'E-4'], ['F-3', 'A-3', 'C-4'], ['G-3', 'B-3', 'D-4'], ['E-3', 'G-3', 'B-3'],
+  ]
+  for (let row = 0; row < 64; row += 2) {
+    const chord = chords[Math.floor(row / 16)]
+    put(project, 'vrc6Pulse2', row, chord[(row / 2) % chord.length], 0, 7)
+    if (row % 4 === 0) put(project, 'vrc6Saw', row, chord[0].replace('3', '2'), 0, 10)
+    if (row % 8 === 0) put(project, 'noise', row, 'C-#', 3, 12)
+    else if (row % 4 === 0) put(project, 'noise', row, '6-#', 3, 8)
+  }
+  return project
+}
+
+export function recoveredProjectForTrack(track: LibraryTrack): TrackerProject | null {
+  if (track.id === 'Z_kTjfJLneY') return interstellarVideoRecovery(track)
+  if (track.id === 'TejsLqPt0-k') return gameCompleteLoop(track)
+  if (track.kind === 'bonus') return epicSaxArrangement(track)
+  const data = transcriptions[track.id]
+  return data ? audioTranscription(track, data) : null
+}

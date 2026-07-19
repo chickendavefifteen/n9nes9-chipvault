@@ -1,14 +1,14 @@
 import type { ChannelDefinition, LibraryTrack } from '../types'
 
 export const channels: ChannelDefinition[] = [
-  { id: 'pulse1', name: 'Pulse 1', short: 'P1', color: '#ffca6a', oscillator: 'square' },
-  { id: 'pulse2', name: 'Pulse 2', short: 'P2', color: '#f08baa', oscillator: 'square' },
-  { id: 'triangle', name: 'Triangle', short: 'TRI', color: '#79d8b2', oscillator: 'triangle' },
-  { id: 'noise', name: 'Noise', short: 'NOI', color: '#b5a6ff', oscillator: 'noise' },
-  { id: 'dpcm', name: 'DPCM', short: 'DMC', color: '#a2b1bd', oscillator: 'sample' },
-  { id: 'vrc6Pulse1', name: 'VRC6 Pulse 1', short: 'V1', color: '#ff885e', oscillator: 'square' },
-  { id: 'vrc6Pulse2', name: 'VRC6 Pulse 2', short: 'V2', color: '#7bc8ff', oscillator: 'square' },
-  { id: 'vrc6Saw', name: 'VRC6 Saw', short: 'SAW', color: '#b8e85d', oscillator: 'sawtooth' },
+  { id: 'pulse1', name: 'Pulse 1', short: 'P1', color: '#f7fbff', oscillator: 'square' },
+  { id: 'pulse2', name: 'Pulse 2', short: 'P2', color: '#a9deff', oscillator: 'square' },
+  { id: 'triangle', name: 'Triangle', short: 'TRI', color: '#8da8ff', oscillator: 'triangle' },
+  { id: 'noise', name: 'Noise', short: 'NOI', color: '#db9cff', oscillator: 'noise' },
+  { id: 'dpcm', name: 'DPCM', short: 'DMC', color: '#c3ccff', oscillator: 'sample' },
+  { id: 'vrc6Pulse1', name: 'VRC6 Pulse 1', short: 'V1', color: '#fff6ff', oscillator: 'square' },
+  { id: 'vrc6Pulse2', name: 'VRC6 Pulse 2', short: 'V2', color: '#73c9ff', oscillator: 'square' },
+  { id: 'vrc6Saw', name: 'VRC6 Saw', short: 'SAW', color: '#c781ff', oscillator: 'sawtooth' },
 ]
 
 export const tutorials = [
@@ -21,7 +21,7 @@ export const library: LibraryTrack[] = [
     id: 'Z_kTjfJLneY', slug: 'interstellar-odyssey', title: 'FamiTracker - Interstellar Odyssey (Original)', shortTitle: 'Interstellar Odyssey',
     kind: 'original', duration: 104, uploaded: '2012-12-17', expansion: 'VRC6',
     description: 'Written for a friend’s Android game.', sourceUrl: 'https://www.youtube.com/watch?v=Z_kTjfJLneY',
-    audio: 'audio/Z_kTjfJLneY.m4a', poster: 'posters/Z_kTjfJLneY.jpg', recoveryStatus: 'source-missing',
+    audio: 'audio/Z_kTjfJLneY.m4a', poster: 'posters/Z_kTjfJLneY.jpg', recoveryStatus: 'pattern-recovered',
   },
   {
     id: 'gls1CjId7YA', slug: 'ma-petite-fleur', title: 'FamiTracker - “Ma Petite Fleur” by Radix (Cover)', shortTitle: 'Ma Petite Fleur',
@@ -87,7 +87,7 @@ export const library: LibraryTrack[] = [
     id: 'TejsLqPt0-k', slug: 'game-complete-loop', title: 'FamiTracker - Game Complete Loop (Original)', shortTitle: 'Game Complete Loop',
     kind: 'original', duration: 48, uploaded: '2012-04-05', expansion: 'VRC6',
     description: 'A short 12-second loop written for an assignment game.', sourceUrl: 'https://www.youtube.com/watch?v=TejsLqPt0-k',
-    audio: 'audio/TejsLqPt0-k.m4a', poster: 'posters/TejsLqPt0-k.jpg', recoveryStatus: 'source-missing',
+    audio: 'audio/TejsLqPt0-k.m4a', poster: 'posters/TejsLqPt0-k.jpg', recoveryStatus: 'pattern-recovered',
   },
   {
     id: 'J9TnXwQS7e4', slug: 'dead-feelings', title: 'FamiTracker - Dead Feelings (Cover)', shortTitle: 'Dead Feelings',
@@ -118,5 +118,12 @@ export const library: LibraryTrack[] = [
     kind: 'original', duration: 74, uploaded: '2012-04-05', expansion: 'VRC6',
     description: 'Level background music written for an assignment game.', sourceUrl: 'https://www.youtube.com/watch?v=gVHCm-fxF5g',
     audio: 'audio/gVHCm-fxF5g.m4a', poster: 'posters/gVHCm-fxF5g.jpg', recoveryStatus: 'source-missing',
+  },
+  {
+    id: 'ez8m4PXksQs', slug: 'bonus-epic-sax-guy', title: 'BONUS - Epic Sax Guy (10-minute chiptune)', shortTitle: 'BONUS: Epic Sax Guy',
+    kind: 'bonus', duration: 600, uploaded: '2024-01-27', expansion: 'VRC6',
+    credit: 'Chiptune arrangement of the saxophone riff performed by SunStroke Project and Olia Tira.',
+    description: 'A browser-synthesized VRC6-style arrangement, looped for a maximum ten-minute session.',
+    sourceUrl: 'https://www.youtube.com/watch?v=ez8m4PXksQs', poster: 'posters/epic-sax-bonus.svg', recoveryStatus: 'arranged-cover',
   },
 ]
