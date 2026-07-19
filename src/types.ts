@@ -41,6 +41,7 @@ export interface TrackerCell {
   instrument: number | null
   volume: number | null
   effect: string
+  effects?: string[]
   edited?: boolean
 }
 

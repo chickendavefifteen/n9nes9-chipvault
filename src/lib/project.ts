@@ -79,19 +79,26 @@ function quote(value: string): string {
   return `"${value.replace(/"/g, "'")}"`
 }
 
-function famiNote(cell: TrackerCell, channelId: ChannelId): string {
-  const effect = /^[0-9A-Z][0-9A-F]{2}$/.test(cell.effect.toUpperCase()) ? cell.effect.toUpperCase() : '...'
-  if (!cell.note) return `... .. . ${effect}`
-  const instrument = cell.instrument ?? (channelId.startsWith('vrc6') ? 1 : 0)
+function famiNote(cell: TrackerCell, channelId: ChannelId, effectCount: number): string {
+  const sourceEffects = cell.effects?.length ? cell.effects : [cell.effect]
+  const effects = Array.from({ length: effectCount }, (_, index) => {
+    const effect = sourceEffects[index]?.toUpperCase() ?? ''
+    return /^[0-9A-Z][0-9A-F]{2}$/.test(effect) ? effect : '...'
+  })
+  if (!cell.note) return `... .. . ${effects.join(' ')}`
+  const instrument = cell.instrument === null
+    ? (cell.effects ? '..' : channelId.startsWith('vrc6') ? '01' : '00')
+    : cell.instrument.toString(16).padStart(2, '0').toUpperCase()
   const volume = cell.volume === null ? '.' : cell.volume.toString(16).toUpperCase()
-  return `${cell.note.padEnd(3, '.')} ${instrument.toString(16).padStart(2, '0').toUpperCase()} ${volume} ${effect}`
+  return `${cell.note.padEnd(3, '.')} ${instrument} ${volume} ${effects.join(' ')}`
 }
 
 export function exportFamiTrackerText(project: TrackerProject): string {
   const sourceUsesVrc6 = library.find((track) => track.id === project.sourceId)?.expansion === 'VRC6'
-  const hasVrc6Data = channels.some((channel) => channel.id.startsWith('vrc6') && project.cells[channel.id].some((cell) => cell.note || cell.effect))
+  const hasVrc6Data = channels.some((channel) => channel.id.startsWith('vrc6') && project.cells[channel.id].some((cell) => cell.note || cell.effect || cell.effects?.some((effect) => effect !== '...')))
   const expansion = sourceUsesVrc6 || hasVrc6Data ? 1 : 0
   const activeChannels = expansion ? channelIds : channelIds.slice(0, 5)
+  const effectColumns = activeChannels.map((id) => Math.max(1, ...project.cells[id].map((cell) => cell.effects?.length ?? 1)))
   const lines = [
     '# FamiTracker text export 0.4.6',
     '',
@@ -112,12 +119,14 @@ export function exportFamiTrackerText(project: TrackerProject): string {
     'MACROVRC6 0 0 -1 0 0 : 15 14 13 12 11 10 9 8 7 6 5 4 3 2 1 0',
     '',
     'INST2A03 0 0 -1 -1 -1 -1 "Recovered 2A03 lead"',
+    'INST2A03 2 0 -1 -1 -1 -1 "Recovered noise"',
     'INST2A03 3 0 -1 -1 -1 -1 "Recovered 2A03 rhythm"',
+    'INST2A03 4 0 -1 -1 -1 -1 "Recovered triangle"',
     'INSTVRC6 0 0 -1 -1 -1 -1 "Recovered VRC6"',
     'INSTVRC6 1 0 -1 -1 -1 -1 "VRC6 draft"',
     '',
     `TRACK ${project.patternLength} ${project.speed} ${project.tempo} ${quote(project.title)}`,
-    `COLUMNS : ${activeChannels.map(() => '1').join(' ')}`,
+    `COLUMNS : ${effectColumns.join(' ')}`,
     '',
   ]
 
@@ -132,7 +141,7 @@ export function exportFamiTrackerText(project: TrackerProject): string {
     for (let row = 0; row < project.patternLength; row += 1) {
       const globalRow = pattern * project.patternLength + row
       const rowHex = row.toString(16).padStart(2, '0').toUpperCase()
-      lines.push(`ROW ${rowHex} : ${activeChannels.map((id) => famiNote(project.cells[id][globalRow] ?? emptyCell(), id)).join(' : ')}`)
+      lines.push(`ROW ${rowHex} : ${activeChannels.map((id, index) => famiNote(project.cells[id][globalRow] ?? emptyCell(), id, effectColumns[index])).join(' : ')}`)
     }
   }
   return `${lines.join('\n')}\n`
@@ -165,13 +174,15 @@ export function importFamiTrackerText(input: string, sourceId = library[0].id): 
       if (rowIndex >= rows) return
     const sections = line.split(':').slice(1).map((part) => part.trim())
     sections.slice(0, channelIds.length).forEach((section, channelIndex) => {
-      const [note, instrument, volume, effect] = section.split(/\s+/)
-      if (note && (note !== '...' || effect !== '...')) {
+      const [note, instrument, volume, ...effects] = section.split(/\s+/)
+      const effect = effects.find((value) => value !== '...') ?? ''
+      if (note && (note !== '...' || effect)) {
         project.cells[channelIds[channelIndex]][rowIndex] = {
           note: note === '...' ? null : note,
           instrument: instrument === '..' ? null : Number.parseInt(instrument ?? '0', 16),
           volume: volume === '.' ? null : Number.parseInt(volume ?? 'F', 16),
-          effect: effect === '...' ? '' : (effect ?? ''),
+          effect,
+          effects,
         }
       }
     })

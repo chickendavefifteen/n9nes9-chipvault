@@ -1,6 +1,7 @@
 import type { ChannelId, LibraryTrack, TrackerCell, TrackerProject } from '../types'
 import { createDraft } from '../lib/project'
 import transcriptionData from './audio-transcriptions.json'
+import interstellarRecovery from './interstellar-recovery.json'
 
 interface AudioTranscription {
   tempo: number
@@ -16,10 +17,62 @@ interface AudioTranscription {
 
 const transcriptions = transcriptionData as Record<string, AudioTranscription>
 
+interface CompactVideoRecovery {
+  timing: {
+    playbackOffset: number
+    secondsPerRow: number
+    rows: number
+    orders: number
+  }
+  effectColumns: number[]
+  rows: string[][]
+}
+
+const interstellar = interstellarRecovery as CompactVideoRecovery
+const recoveryChannels: ChannelId[] = ['pulse1', 'pulse2', 'triangle', 'noise', 'dpcm', 'vrc6Pulse1', 'vrc6Pulse2', 'vrc6Saw']
+
 const blank = (): TrackerCell => ({ note: null, instrument: null, volume: null, effect: '' })
 
 function put(project: TrackerProject, channel: ChannelId, row: number, note: string | null, instrument: number | null = null, volume: number | null = null, effect = '') {
   project.cells[channel][row] = { note, instrument, volume, effect }
+}
+
+function interstellarVideoRecovery(track: LibraryTrack): TrackerProject {
+  const project = createDraft(track, interstellar.timing.rows)
+  project.speed = 8
+  project.tempo = 150
+  project.patternLength = 64
+  project.loop = false
+  project.recoveryStatus = 'pattern-recovered'
+  project.contentRevision = 4
+  project.sourceSync = {
+    audioOffset: interstellar.timing.playbackOffset,
+    secondsPerRow: interstellar.timing.secondsPerRow,
+    loopRows: interstellar.timing.rows,
+    confidence: 0.96,
+    evidence: [
+      'Full 1280×720 YouTube tracker capture sampled row by row',
+      '12 visible 64-row orders and all eight 2A03/VRC6 channels',
+      'Notes, instruments, volumes, and every visible effect column recovered from the fixed pixel grid',
+      'Instrument envelope macros remain reconstructed because their editor was not shown in the video',
+    ],
+  }
+
+  interstellar.rows.forEach((rowCells, row) => {
+    rowCells.forEach((encoded, channelIndex) => {
+      const [noteToken, instrumentToken, volumeToken, ...effectTokens] = encoded.split(' ')
+      const visibleEffects = effectTokens.slice(0, interstellar.effectColumns[channelIndex])
+      const audibleEffect = visibleEffects.find((effect) => effect !== '...') ?? ''
+      project.cells[recoveryChannels[channelIndex]][row] = {
+        note: noteToken === '...' ? null : noteToken,
+        instrument: instrumentToken === '..' ? null : Number.parseInt(instrumentToken, 16),
+        volume: volumeToken === '.' ? null : Number.parseInt(volumeToken, 16),
+        effect: audibleEffect,
+        effects: visibleEffects,
+      }
+    })
+  })
+  return project
 }
 
 function populateRhythm(project: TrackerProject, offset: number) {
@@ -161,6 +214,7 @@ function epicSaxArrangement(track: LibraryTrack): TrackerProject {
 }
 
 export function recoveredProjectForTrack(track: LibraryTrack): TrackerProject | null {
+  if (track.id === 'Z_kTjfJLneY') return interstellarVideoRecovery(track)
   if (track.id === 'TejsLqPt0-k') return gameCompleteLoop(track)
   if (track.kind === 'bonus') return epicSaxArrangement(track)
   const data = transcriptions[track.id]

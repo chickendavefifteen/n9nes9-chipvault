@@ -9,7 +9,7 @@ A static, offline-capable archive and modern browser tracker for the music uploa
 - The channel exposes 19 videos: 17 music/demo uploads and 2 tutorials.
 - The uploads date from 2012 and were made in FamiTracker; many use VRC6.
 - The descriptions contain one historical MediaFire FTM link. No live source module has yet been recovered.
-- YouTube audio is a mixed render. It does not contain the original per-channel notes, instruments, effects, frames, or pattern order.
+- YouTube audio is a mixed render, but the Interstellar Odyssey upload also contains a fixed 1280×720 FamiTracker screen capture exposing 12 played orders, all eight 2A03/VRC6 channels, and their visible note/instrument/volume/effect tokens.
 
 ## Assumptions
 
@@ -47,7 +47,7 @@ A static, offline-capable archive and modern browser tracker for the music uploa
 - R26: Only one current Chipvault tab may play at once. Current tabs coordinate with BroadcastChannel plus a storage-event fallback, and a newer idle build reloads itself on focus, visibility return, page restore, online recovery, or the bounded manifest poll.
 - R27: Every historical hashed entrypoint observed in deployed or still-open tabs must remain resolvable. Cache-safe deployment aliases historical JS/CSS names to the newly tested bundle so stale HTML cannot revive obsolete playback code.
 - R28: Because GitHub Pages forces a ten-minute document cache, every top-level navigation must immediately replace itself with a unique `fresh` query request, then remove only that token from the visible URL without another navigation. Reloading, revisiting, or opening an old bookmark must therefore obtain a fresh HTML document.
-- R29: Selecting any of the 18 library entries must load a populated editable pattern with visible note keys. The 16 recordings without frame recovery use reproducible dominant-pitch/onset analysis of the preserved mix and must not be described as exact original modules.
+- R29: Selecting any of the 18 library entries must load a populated editable pattern with visible note keys. The 15 recordings without frame recovery use reproducible dominant-pitch/onset analysis of the preserved mix and must not be described as exact original modules.
 - R30: Switching tracks must upgrade any older locally saved blank baseline when the shipped content revision is newer, without overwriting newer user edits.
 - R31: Edit mode must separate the authentic source recording from the approximate editable chip preview, audition entered notes, show an explicit dirty working-copy state, and save to browser-local storage only through the visible Save action. A baseline upgrade must merge, not discard, cells already marked as user edits.
 - R32: Any sound-affecting edit must automatically arm Edited preview for the next Play, place its playhead on the changed row, stop an incompatible source transport, and visibly identify that start row. Original mix remains available only as an explicit A/B selection after the edit.
@@ -58,6 +58,8 @@ A static, offline-capable archive and modern browser tracker for the music uploa
 - R37: Until editing is deliberately re-enabled, the public site is viewer-only and this requirement supersedes the editing portions of R4, R5, R14, R18, and R29–R36. It must not render Edit, Save, import, reset, undo/redo, note-entry, effect, volume, tempo, speed, loop-editing, or edited-preview controls.
 - R38: Viewer-only boot must ignore and remove only Chipvault's legacy per-track local project keys, always load the shipped clean baseline, and allow a newer build to reload even when browser storage is unavailable. Playback coordination state and unrelated storage must remain untouched.
 - R39: Every FamiTracker download must use the 0.4.6 text-import contract, declare the track's VRC6 expansion even when a channel is sparse, use an importer-valid N163 channel count and exact directive arities, contain the expected channel columns and populated note rows, and label the required `File → Import text…` workflow.
+- R40: Interstellar Odyssey must use one canonical video-recovered module for the moving browser grid and FamiTracker text export. Its preserved source recording remains the playback reference; the obsolete 128-row audio approximation must not drive its animation or download.
+- R41: The Interstellar module must contain 12 × 64 rows, speed 8, tempo 150, the original eight-channel order, and visible effect-column counts `3 2 1 1 4 3 3 2`. Source playback must run once for the full 1:43 recording while the centre playhead advances across the recovered orders.
 
 ## Acceptance checks
 
@@ -97,15 +99,17 @@ A static, offline-capable archive and modern browser tracker for the music uploa
 - C34: A previously used browser profile and a clean navigation both show `viewer-only`, contain no edit/save/import controls or edited cells, load the shipped baseline, play archived tracks through `source-playing`, and retain pattern, FamiTracker, and source-audio downloads.
 - C35: Unit tests prove legacy Chipvault project keys are removed without reading their values or removing unrelated keys; production build, repeated reloads, historical-asset checks, and the live Pages URL all report the current viewer-only build.
 - C36: An all-library test validates expansion, N163 channel range, instrument-directive numeric arity, column count, row width, and populated note data for every exported module; the downloaded live file then imports into stock FamiTracker 0.4.6 without a parser error.
+- C37: Unit tests prove Interstellar contains 768 rows, the eight expected channels, multi-effect cells including `037 A02 V02`, DPCM `000` artwork, and a 12-order export whose `COLUMNS` line is `3 2 1 1 4 3 3 2`.
+- C38: A browser playback test samples Interstellar near the beginning, middle, and end and proves the visible order/row follows the source recording without wrapping at 128 rows or stopping after about 15 seconds.
 
 ## Out of scope for this recovery pass
 
-- Claiming exact note-for-note recovery without original FTM files or completed video-frame transcription.
+- Claiming the hidden instrument envelope macros are original; the video never opened the instrument editors, so those remain reconstructed even when visible pattern tokens are recovered.
 - Binary `.ftm` generation in-browser. The interoperable export is FamiTracker's official text module format (`.txt`).
 - Republishing the two tutorial videos.
 
 ## Falsifiers and unknowns
 
 - A recovered original `.ftm` falsifies the corresponding `recoveryStatus: source-missing` entry and should replace the draft.
-- Visual transcription from the screen recordings may recover exact patterns, but frame order, hidden instruments, macros, and off-screen effects still require verification.
+- The visible Interstellar frame order and cells are recovered from the screen recording; hidden instrument macros remain the principal fidelity unknown and require render-to-source comparison.
 - Cover redistribution rights are not proven by channel ownership alone; credits and source links are preserved, but the operator remains responsible for rights clearance.

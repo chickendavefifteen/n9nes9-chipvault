@@ -1082,12 +1082,12 @@ function TrackerGrid({ project, playhead, referenceAudioRef, referenceActive, ch
               const cell = project.cells[channel.id][row]
               const selected = channel.id === selectedChannel && row === selectedRow
               const rangeSelected = selectedCellKeys.has(cellKey(channel.id, row))
-              const instrument = cell.note && cell.instrument !== null ? cell.instrument.toString(16).padStart(2, '0').toUpperCase() : '··'
-              const volume = cell.note && cell.volume !== null ? cell.volume.toString(16).toUpperCase() : '·'
-              const effect = cell.effect || '···'
+              const instrument = cell.instrument !== null ? cell.instrument.toString(16).padStart(2, '0').toUpperCase() : '..'
+              const volume = cell.volume !== null ? cell.volume.toString(16).toUpperCase() : '.'
+              const effects = cell.effects?.length ? cell.effects : [cell.effect || '...']
               return <td key={channel.id} style={{ '--channel': channel.color } as React.CSSProperties}><button data-grid-channel={channel.id} data-grid-row={row} aria-label={`${channel.name}, row ${row}${rangeSelected ? ', selected' : ''}${cell.edited ? ', user edited' : ''}`} aria-pressed={rangeSelected} className={`${selected ? 'selected-cell' : ''} ${rangeSelected ? 'range-selected' : ''} ${cell.edited ? 'user-edited' : ''}`} onPointerDown={(event) => { if (event.button !== 0) return; event.preventDefault(); onSelectionStart(channel.id, row, event.shiftKey) }} onPointerOver={() => { if (editing) onSelectionMove(channel.id, row) }} onPointerUp={onSelectionEnd} onDoubleClick={(event) => { if (editing && rangeSelected) { event.preventDefault(); onClearSelection() } }} onContextMenu={(event) => { if (editing && rangeSelected) { event.preventDefault(); onClearSelection() } }}>
-                <b className={`note-token ${cell.note ? '' : 'empty-token'}`}>{cell.note ?? '···'}</b>
-                <span className="cell-fields"><i className={`instrument-token ${instrument === '··' ? 'empty-token' : ''}`}>{instrument}</i><i className={`volume-token ${volume === '·' ? 'empty-token' : ''}`}>{volume}</i><i className={`effect-token ${effect === '···' ? 'empty-token' : ''}`}>{effect}</i></span>
+                <b className={`note-token ${cell.note ? '' : 'empty-token'}`}>{cell.note ?? '...'}</b>
+                <span className="cell-fields"><i className={`instrument-token ${instrument === '..' ? 'empty-token' : ''}`}>{instrument}</i><i className={`volume-token ${volume === '.' ? 'empty-token' : ''}`}>{volume}</i><span className="effect-columns">{effects.map((effect, index) => <i key={`${index}-${effect}`} className={`effect-token ${effect === '...' ? 'empty-token' : ''}`}>{effect}</i>)}</span></span>
                 {cell.edited && <em className="edit-marker">EDIT</em>}
               </button></td>
             })}

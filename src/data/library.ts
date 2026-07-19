@@ -21,7 +21,7 @@ export const library: LibraryTrack[] = [
     id: 'Z_kTjfJLneY', slug: 'interstellar-odyssey', title: 'FamiTracker - Interstellar Odyssey (Original)', shortTitle: 'Interstellar Odyssey',
     kind: 'original', duration: 104, uploaded: '2012-12-17', expansion: 'VRC6',
     description: 'Written for a friend’s Android game.', sourceUrl: 'https://www.youtube.com/watch?v=Z_kTjfJLneY',
-    audio: 'audio/Z_kTjfJLneY.m4a', poster: 'posters/Z_kTjfJLneY.jpg', recoveryStatus: 'source-missing',
+    audio: 'audio/Z_kTjfJLneY.m4a', poster: 'posters/Z_kTjfJLneY.jpg', recoveryStatus: 'pattern-recovered',
   },
   {
     id: 'gls1CjId7YA', slug: 'ma-petite-fleur', title: 'FamiTracker - “Ma Petite Fleur” by Radix (Cover)', shortTitle: 'Ma Petite Fleur',
